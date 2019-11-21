@@ -4,13 +4,11 @@ import random
 import hashlib
 import binascii
 
-parser = argparse.ArgumentParser(description='A golden nonce discoverer for blocks running concurrently using AWS.')
-parser.add_argument("--n", default=0, type=int, help="The number of Virtual Machines to distribute the brute force search to")
+parser = argparse.ArgumentParser(description='A locally run golden nonce discoverer for blocks.')
 parser.add_argument("--d", default=10, type=int, help="The difficulty of nonce discovery. This corressponds to the number of leading zero bits required in the hash.")
 
 args = parser.parse_args()
 
-no_of_vms = args.n
 difficulty = args.d
 
 max_nonce = 2 ** 32
