@@ -38,6 +38,8 @@ def get_block_hash_binary(block_hash):
 
 # Nonce discovery
 if __name__ == "__main__":
+    golden_nonce = 0
+    
     # Brute force through all possible nonce values
     for nonce in range(0, max_nonce):
         block = get_block(nonce)
@@ -52,7 +54,14 @@ if __name__ == "__main__":
         if (leading_zeroes == difficulty):
             print(f'nonce {nonce} contains require leading zeroes of {difficulty}')
             print(f'block = {block_hash_binary}')
-            exit()
+            golden_nonce = nonce
+            break
+        
+    f = open("home/ec2-user/nonce.txt", "w")
+
+    f.write(str(golden_nonce))
+    f.close()
+            
 
 
 
