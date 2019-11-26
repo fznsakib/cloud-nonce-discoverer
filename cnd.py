@@ -1,19 +1,25 @@
 import os
+import boto3
+import json
 import argparse
 import random
 import hashlib
 import binascii
 
+max_nonce = 2 ** 32
+
 parser = argparse.ArgumentParser(description='A golden nonce discoverer for blocks running concurrently using AWS.')
-parser.add_argument("--n", default=0, type=int, help="The number of Virtual Machines to distribute the brute force search to")
-parser.add_argument("--d", default=10, type=int, help="The difficulty of nonce discovery. This corressponds to the number of leading zero bits required in the hash.")
+parser.add_argument("--start", default=0, type=int, help="The number to start brute force search from")
+parser.add_argument("--end", default=max_nonce, type=int, help="The number to end brute force search at")
+parser.add_argument("--d", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
 
 args = parser.parse_args()
 
-no_of_vms = args.n
+start_nonce = args.start
+max_nonce = args.end
 difficulty = args.d
 
-max_nonce = 2 ** 32
+sqs = boto3.client('sqs', region_name='us-east-1')
 
 # Create block with the data and provided nonce
 def get_block(nonce):
@@ -36,31 +42,48 @@ def get_block_hash_binary(block_hash):
     block_hash_binary = bin(int('1'+block_hash_string, 16))[3:]
     return block_hash_binary
 
+def getQueueURL(queue_name):
+    response = sqs.get_queue_url(QueueName=queue_name)
+    queue_url = response['QueueUrl']
+    return queue_url
+
+def nonce_found(golden_nonce):
+    f = open("home/ec2-user/nonce.txt", "w")
+    f.write(str(golden_nonce))
+    f.close()
+    
+    out_queue_url = getQueueURL('outqueue.fifo')
+    message = {
+        'nonce' : golden_nonce
+    }
+    response = sqs.send_message(
+        QueueUrl=out_queue_url,
+        MessageBody=(
+            json.dumps(message)
+        ),
+        MessageGroupId='0',
+    )
+
 # Nonce discovery
 if __name__ == "__main__":
     golden_nonce = 0
     
     # Brute force through all possible nonce values
-    for nonce in range(0, max_nonce):
+    # CHANGE TO WHILE TO AVOID OVER-ALLOCATING
+    for nonce in range(start_nonce, max_nonce + 1):
         block = get_block(nonce)
         block_hash = get_block_hash(block)
         block_hash_binary = get_block_hash_binary(block_hash)
 
         leading_zeroes = len(block_hash_binary.split('1', 1)[0])
 
-        # print(block_hash_binary)
-        print(f'number of leading zeroes: {leading_zeroes}')
-
         if (leading_zeroes == difficulty):
             print(f'nonce {nonce} contains require leading zeroes of {difficulty}')
             print(f'block = {block_hash_binary}')
-            golden_nonce = nonce
+            nonce_found(nonce)
             break
         
-    f = open("home/ec2-user/nonce.txt", "w")
 
-    f.write(str(golden_nonce))
-    f.close()
             
 
 
