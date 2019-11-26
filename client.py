@@ -80,6 +80,12 @@ args = parser.parse_args()
 no_of_instances = args.instances
 difficulty = args.difficulty
 
+print(f'Number of instances = {no_of_instances}')
+print(f'Difficulty = {difficulty}')
+print('----------------------------------------------------')
+print('-----------------------START------------------------')
+print('----------------------------------------------------')
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -203,34 +209,46 @@ print(f'Waiting for reply...', end="")
 
 message_received = False
 
-while not message_received:
-    response = sqs.receive_message(
-        QueueUrl=out_queue_url,
-        AttributeNames=[
-            'SentTimestamp'
-        ],
+# while not message_received:
+#     response = sqs.receive_message(
+#         QueueUrl=out_queue_url,
+#         AttributeNames=[
+#             'SentTimestamp'
+#         ],
+#         MaxNumberOfMessages=1,
+#         WaitTimeSeconds=20
+#     )
+    
+#     if ('messages' in response.keys()):
+#         message_received = True
+
+while not message_received: 
+    result = out_queue.receive_messages(
         MaxNumberOfMessages=1,
-        WaitTimeSeconds=20
+        # VisibilityTimeout=10,
+        # WaitTimeSeconds=10,
+        VisibilityTimeout=1,
+        WaitTimeSeconds=1,
     )
-    
-    if ('messages' in response.keys()):
+
+    if result:
         message_received = True
+        response = out_queue.delete_messages(
+        Entries=[
+            {
+                'Id': result[0].message_id,
+                'ReceiptHandle': result[0].receipt_handle
+            },
+        ]
+    )
+
     
-    
-# Delete message off queue
-# response = out_queue(
-    
-# )
+print('SUCCESS!')
 
 print(f'\n{result}\n')
 
-message_body = result['Messages'][0]['Body']
-message_body = json.loads(message_body)
-
+message_body = json.loads(result[0].body)
 nonce = message_body['nonce']
-
-print('SUCCESS!')
-
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Gracefully shutdown all running instances
@@ -245,7 +263,6 @@ for instance in instances:
 response = ec2.terminate_instances(InstanceIds=instance_ids)
 
 print('SUCCESS!')
-
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Delete queues
@@ -267,5 +284,6 @@ Log Feedback
 print('----------------------------------------------------')
 print('------------------NONCE DISCOVERED------------------')
 print('----------------------------------------------------')
+
 print(f'Golden nonce: {nonce}')
 
