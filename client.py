@@ -1,36 +1,18 @@
 import sys
 import os
 import math
+import signal
 import json
 import boto3
 import argparse
 import time
 import datetime
 import functools
+import aws
 from botocore.exceptions import ClientError
 
 # Disable output buffering
 print = functools.partial(print, flush=True)
-
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-AWS Functions
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-def createFifoQueue(queue_name):
-    response = sqs.create_queue(
-        QueueName=queue_name,
-        Attributes={
-            'DelaySeconds': '5',
-            'MessageRetentionPeriod': '86400',
-            'FifoQueue': 'true',
-            'ContentBasedDeduplication': 'true',
-        }
-    )
-
-def getQueueURL(queue_name):
-    response = sqs.get_queue_url(QueueName=queue_name)
-    queue_url = response['QueueUrl']
-    return queue_url
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Argument Parsing
@@ -44,24 +26,26 @@ def instance_type(x):
         raise argparse.ArgumentTypeError("Minimum number of instances is 1")
     return x
 
+def time_type(x):
+    x = int(x)
+    if x < 0:
+        raise argparse.ArgumentTypeError("Timeout value must be positive")
+    return x
+
 parser = argparse.ArgumentParser(description='''A client interfacing with AWS allowing a user to discover the golden nonce 
                                  for a block. This solution is parallelised across a given n EC2 instances for faster performance.''')
 
 parser.add_argument("-i", "--instances", default=1, type=instance_type, help="The number of EC2 instances to divide the task across.")
 parser.add_argument("-d", "--difficulty", default=10, type=int, help='''The difficulty of nonce discovery. This corresponds to the 
                     number of leading zero bits required in the hash.''')
+parser.add_argument("-t", "--timeout", default=6000, type=time_type, help="Limit of time before scram is initiated")
 
 args = parser.parse_args()
 
 no_of_instances = args.instances
 difficulty = args.difficulty
-
-print('----------------------------------------------------')
-print('-----------------------START------------------------')
-print('----------------------------------------------------')
-print(f'-------------- Number of instances = {no_of_instances} -------------')
-print(f'------------------ Difficulty = {difficulty} -----------------')
-print('----------------------------------------------------')
+timeout = args.timeout
+instances = []
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS
@@ -74,16 +58,41 @@ ec2_resource = boto3.resource('ec2')
 sqs_resource = boto3.resource('sqs')
 
 # SQS Queues
-in_queue_name = 'inqueue.fifo'
-out_queue_name = 'outqueue.fifo'
-in_queue_url = getQueueURL(in_queue_name)
-out_queue_url = getQueueURL(out_queue_name)
+# Use create_event_source_mapping to create queues?
+in_queue_url = aws.getQueueURL(sqs, 'inqueue.fifo')
+out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 
-# Use create_event_source_mapping to create queues?
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Callbacks
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-# Upload python script to S3 bucket
+def terminate(signum, frame):
+    signal.signal(signal.SIGINT, original_sigint)
+    
+    print('Scram initialised, shutting down everything...', end="")
+    aws.scram(ssm, ec2, instances, [in_queue, out_queue])
+    print('SUCCESS!')
+    print('Exiting...')    
+    exit()
+
+original_sigint = signal.getsignal(signal.SIGINT)
+signal.signal(signal.SIGINT, terminate)
+
+
+print('----------------------------------------------------')
+print('-----------------------START------------------------')
+print('----------------------------------------------------')
+print(f'-------------- Number of instances = {no_of_instances} -------------')
+print(f'------------------ Difficulty = {difficulty} -----------------')
+print('----------------------------------------------------')
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Upload python script cnd.py to S3 bucket
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
 print('Uploading cnd.py to S3 bucket...', end="")
 
 BUCKET = "faizaanbucket"
@@ -97,30 +106,7 @@ Initialise instances
 
 print(f'Initialising {no_of_instances} EC2 instance(s)...', end="")
 
-instances = ec2.run_instances(
-    BlockDeviceMappings=[
-        {   
-            'DeviceName': '/dev/xvda',
-            'Ebs': {
-                'DeleteOnTermination': True,
-                'VolumeSize': 8,
-                'VolumeType': 'gp2',
-                'Encrypted': False,
-            },
-        },
-    ],
-    ImageId = 'ami-091805f6b92bf74a1',
-    InstanceType = 't2.micro',
-    KeyName = 'awsec2',
-    MinCount = 1,
-    MaxCount = no_of_instances,
-    SecurityGroups=['security-group-allow-all'],
-    IamInstanceProfile={
-        'Name': 'EC2AdminRole'
-    },
-)
-
-instances = instances['Instances']
+instances = aws.createInstances(ec2, no_of_instances)
 
 print('SUCCESS!')
 
@@ -130,23 +116,7 @@ Wait to complete checks
 
 print(f'Waiting for EC2 status checks to complete...', end="")
 
-# Keep checking until all status checks complete
-ordered_instances = []
-all_instances_ready = False
-
-while (not all_instances_ready):
-    instances_response = ec2_resource.instances.filter(
-        Filters=[{
-            'Name': 'instance-state-name', 
-            'Values': ['running']
-        }]
-    )
-    ordered_instances = [instance for instance in instances_response]
-    
-    if len(ordered_instances) == no_of_instances:
-        all_instances_ready = True
-    
-    time.sleep(1)
+ordered_instances = aws.waitUntilInstancesReady(ec2_resource, no_of_instances)
           
 # Give some additional time for instances to settle down
 # Note: without the wait period below, the Lambda function would fail
@@ -159,7 +129,7 @@ print('SUCCESS!')
 Send message to SQS queue to trigger script
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-# For loop to send n messages to queue each with instance_id
+# Calculate search space for each EC2 instance
 max_nonce = 2 ** 32
 search_split = math.ceil(max_nonce / len(ordered_instances))
 
@@ -175,14 +145,8 @@ for i in range(0, len(ordered_instances)):
         "startNonce" : start_nonce,
         "endNonce" : end_nonce
     }
-
-    response = sqs.send_message(
-        QueueUrl=in_queue_url,
-        MessageBody=(
-            json.dumps(message)
-        ),
-        MessageGroupId='0',
-    )
+    
+    response = aws.sendMessageToQueue(in_queue, message)
 
     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         print(f'SUCCESS!')
@@ -200,23 +164,13 @@ message_received = False
 start_time = datetime.datetime.now()
 
 while not message_received: 
-    result = out_queue.receive_messages(
-        MaxNumberOfMessages=1,
-        VisibilityTimeout=10,
-        WaitTimeSeconds=20,
-    )
+    message = aws.receiveMessageFromQueue(out_queue)
 
-    if result:
+    if message:
         message_received = True
-        response = out_queue.delete_messages(
-        Entries=[
-            {
-                'Id': result[0].message_id,
-                'ReceiptHandle': result[0].receipt_handle
-            },
-        ]
-    )
-
+        aws.deleteMessageFromQueue(out_queue, message)
+        
+        
 end_time = datetime.datetime.now()
 message_time_taken = (end_time - start_time).total_seconds()
 
@@ -224,42 +178,20 @@ print('SUCCESS!')
 
 print(f'Time taken to receive message: {message_time_taken}')
 
-message_body = json.loads(result[0].body)
+message_body = json.loads(message[0].body)
 nonce = message_body['nonce']
 block_binary = message_body['blockBinary']
 sender_instance_id = message_body['instanceId']
 time_taken = message_body['timeTaken']
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Cancel all running commands
+Gracefully shutdown all running commands and instances
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-# Get all running commands before cancelling
-running_commands = ssm.list_commands(
-    Filters=[
-        {
-            'key': 'Status',
-            'value': 'InProgress'
-        },
-    ]
-)
+print(f'Shutting down all running commands and EC2 instances...', end="")
 
-for command in running_commands['Commands']:
-    command_id = command['CommandId']
-    ssm.cancel_command(CommandId=command_id)
-    
-
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Gracefully shutdown all running instances
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-print(f'Shutting down all running EC2 instances...', end="")
-
-instance_ids = []
-for instance in instances:
-    instance_ids.append(instance['InstanceId'])
-
-response = ec2.terminate_instances(InstanceIds=instance_ids)
+aws.cancelAllCommands(ssm)
+aws.shutdownAllInstances(ec2, instances)
 
 print('SUCCESS!')
 
@@ -270,8 +202,9 @@ Delete queues
 print(f'Purging SQS queues...', end="")
 
 # Remove all outstanding messages in queues
-response = in_queue.purge()
-response = out_queue.purge()
+# response = in_queue.purge()
+# response = out_queue.purge()
+aws.purgeQueues([in_queue, out_queue])
 
 print('SUCCESS!')
 
