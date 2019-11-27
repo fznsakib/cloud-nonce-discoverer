@@ -21,6 +21,7 @@ max_nonce = args.end
 difficulty = args.d
 
 sqs = boto3.client('sqs', region_name='us-east-1')
+s3 = boto3.resource('s3')
 
 def getQueueURL(queue_name):
     response = sqs.get_queue_url(QueueName=queue_name)
@@ -37,6 +38,7 @@ def get_block(nonce):
 
 def get_block_hash(block):
     block_hash = hashlib.sha256(str.encode(block))
+    block_hash = hashlib.sha256(str.encode(block_hash.hexdigest()))
     return block_hash
 
 # Get block hash in binary representation
@@ -87,6 +89,8 @@ if __name__ == "__main__":
             break
         
         current_nonce += 1
+    
+    
         
 
             

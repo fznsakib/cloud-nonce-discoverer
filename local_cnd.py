@@ -23,6 +23,7 @@ def get_block(nonce):
 
 def get_block_hash(block):
     block_hash = hashlib.sha256(str.encode(block))
+    block_hash = hashlib.sha256(str.encode(block_hash.hexdigest()))
     return block_hash
 
 # Get block hash in binary representation
