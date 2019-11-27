@@ -1,9 +1,15 @@
 import sys
+import os
 import json
 import boto3
 import argparse
+import time
+import datetime
+import functools
 from botocore.exceptions import ClientError
 
+# Disable output buffering
+print = functools.partial(print, flush=True)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 AWS Functions
@@ -24,37 +30,6 @@ def getQueueURL(queue_name):
     response = sqs.get_queue_url(QueueName=queue_name)
     queue_url = response['QueueUrl']
     return queue_url
-    
-def startInstance(instance_id):
-    # Do a dryrun first to verify permissions
-    try:
-        ec2.start_instances(InstanceIds=[instance_id], DryRun=True)
-    except ClientError as e:
-        if 'DryRunOperation' not in str(e):
-            raise
-
-    # Dry run succeeded, run start_instances without dryrun
-    try:
-        response = ec2.start_instances(InstanceIds=[instance_id], DryRun=False)
-        print(response)
-    except ClientError as e:
-        print(e)
-
-def stopInstance(instance_id):
-    # Do a dryrun first to verify permissions
-    try:
-        ec2.stop_instances(InstanceIds=[instance_id], DryRun=True)
-    except ClientError as e:
-        if 'DryRunOperation' not in str(e):
-            raise
-
-    # Dry run succeeded, call stop_instances without dryrun
-    try:
-        response = ec2.stop_instances(InstanceIds=[instance_id], DryRun=False)
-        print(response)
-    except ClientError as e:
-        print(e)
-
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Argument Parsing
@@ -80,10 +55,11 @@ args = parser.parse_args()
 no_of_instances = args.instances
 difficulty = args.difficulty
 
-print(f'Number of instances = {no_of_instances}')
-print(f'Difficulty = {difficulty}')
 print('----------------------------------------------------')
 print('-----------------------START------------------------')
+print('----------------------------------------------------')
+print(f'-------------- Number of instances = {no_of_instances} -------------')
+print(f'------------------ Difficulty = {difficulty} -----------------')
 print('----------------------------------------------------')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -168,9 +144,15 @@ while (not all_instances_ready):
     
     if len(instance_ids) == no_of_instances:
         all_instances_ready = True
-               
-print('SUCCESS!')
+    
+    time.sleep(1)
+          
+# Give some additional time for instances to settle down
+# Note: without the wait period below, the Lambda function would fail
+# as it would not recognise the corresponding instance as active
+time.sleep(10)
 
+print('SUCCESS!')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Send message to SQS queue to trigger script
@@ -208,27 +190,13 @@ Read output queue to get back nonce
 print(f'Waiting for reply...', end="")
 
 message_received = False
-
-# while not message_received:
-#     response = sqs.receive_message(
-#         QueueUrl=out_queue_url,
-#         AttributeNames=[
-#             'SentTimestamp'
-#         ],
-#         MaxNumberOfMessages=1,
-#         WaitTimeSeconds=20
-#     )
-    
-#     if ('messages' in response.keys()):
-#         message_received = True
+start_time = datetime.datetime.now()
 
 while not message_received: 
     result = out_queue.receive_messages(
         MaxNumberOfMessages=1,
-        # VisibilityTimeout=10,
-        # WaitTimeSeconds=10,
-        VisibilityTimeout=1,
-        WaitTimeSeconds=1,
+        VisibilityTimeout=10,
+        WaitTimeSeconds=20,
     )
 
     if result:
@@ -242,13 +210,17 @@ while not message_received:
         ]
     )
 
-    
+end_time = datetime.datetime.now()
+message_time_taken = (end_time - start_time).total_seconds()
+   
 print('SUCCESS!')
 
-print(f'\n{result}\n')
+print(f'Time taken to receive message: {message_time_taken}')
 
 message_body = json.loads(result[0].body)
 nonce = message_body['nonce']
+block_binary = message_body['blockBinary']
+time_taken = message_body['timeTaken']
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Gracefully shutdown all running instances
@@ -270,8 +242,7 @@ Delete queues
 
 print(f'Purging SQS queues...', end="")
 
-# Maybe just purge instead?
-# Delete the SQS queues
+# Remove all outstanding messages in queues
 response = in_queue.purge()
 response = out_queue.purge()
 
@@ -282,8 +253,11 @@ Log Feedback
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 print('----------------------------------------------------')
-print('------------------NONCE DISCOVERED------------------')
+print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
 
 print(f'Golden nonce: {nonce}')
+print(f'Data in binary: {block_binary}')
+print(f'Discovered in : {time_taken}s')
+print(f'Message delivery overhead: {message_time_taken - time_taken}s')
 

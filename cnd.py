@@ -5,6 +5,7 @@ import argparse
 import random
 import hashlib
 import binascii
+import datetime
 
 max_nonce = 2 ** 32
 
@@ -20,6 +21,11 @@ max_nonce = args.end
 difficulty = args.d
 
 sqs = boto3.client('sqs', region_name='us-east-1')
+
+def getQueueURL(queue_name):
+    response = sqs.get_queue_url(QueueName=queue_name)
+    queue_url = response['QueueUrl']
+    return queue_url
 
 # Create block with the data and provided nonce
 def get_block(nonce):
@@ -42,19 +48,17 @@ def get_block_hash_binary(block_hash):
     block_hash_binary = bin(int('1'+block_hash_string, 16))[3:]
     return block_hash_binary
 
-def getQueueURL(queue_name):
-    response = sqs.get_queue_url(QueueName=queue_name)
-    queue_url = response['QueueUrl']
-    return queue_url
-
-def nonce_found(golden_nonce):
-    f = open("home/ec2-user/nonce.txt", "w")
-    f.write(str(golden_nonce))
-    f.close()
+def nonce_found(golden_nonce, block_binary, time_taken):
+    # f = open("home/ec2-user/nonce.txt", "w")
+    # f.write(str(golden_nonce))
+    # f.close()
     
+    # Send result to queue for local machine to read
     out_queue_url = getQueueURL('outqueue.fifo')
     message = {
-        'nonce' : golden_nonce
+        'nonce' : golden_nonce,
+        'blockBinary': block_binary,
+        'timeTaken': time_taken
     }
     response = sqs.send_message(
         QueueUrl=out_queue_url,
@@ -66,22 +70,23 @@ def nonce_found(golden_nonce):
 
 # Nonce discovery
 if __name__ == "__main__":
+    start_time = datetime.datetime.now()
+    current_nonce = start_nonce
     golden_nonce = 0
     
     # Brute force through all possible nonce values
-    # CHANGE TO WHILE TO AVOID OVER-ALLOCATING
-    for nonce in range(start_nonce, max_nonce + 1):
-        block = get_block(nonce)
+    while (current_nonce <= max_nonce):
+        block = get_block(current_nonce)
         block_hash = get_block_hash(block)
         block_hash_binary = get_block_hash_binary(block_hash)
-
         leading_zeroes = len(block_hash_binary.split('1', 1)[0])
 
         if (leading_zeroes == difficulty):
-            print(f'nonce {nonce} contains require leading zeroes of {difficulty}')
-            print(f'block = {block_hash_binary}')
-            nonce_found(nonce)
+            time_taken = (datetime.datetime.now() - start_time).total_seconds()
+            nonce_found(current_nonce, block_hash_binary, time_taken)
             break
+        
+        current_nonce += 1
         
 
             
