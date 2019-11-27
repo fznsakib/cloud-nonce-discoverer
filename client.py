@@ -1,5 +1,6 @@
 import sys
 import os
+import math
 import json
 import boto3
 import argparse
@@ -65,10 +66,10 @@ print('----------------------------------------------------')
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-s3 = boto3.resource('s3')
 ec2 = boto3.client('ec2')
 sqs = boto3.client('sqs')
 ssm = boto3.client('ssm')
+s3 = boto3.resource('s3')
 ec2_resource = boto3.resource('ec2')
 sqs_resource = boto3.resource('sqs')
 
@@ -130,7 +131,7 @@ Wait to complete checks
 print(f'Waiting for EC2 status checks to complete...', end="")
 
 # Keep checking until all status checks complete
-instance_ids = []
+ordered_instances = []
 all_instances_ready = False
 
 while (not all_instances_ready):
@@ -140,9 +141,9 @@ while (not all_instances_ready):
             'Values': ['running']
         }]
     )
-    instance_ids = [instance for instance in instances_response]
+    ordered_instances = [instance for instance in instances_response]
     
-    if len(instance_ids) == no_of_instances:
+    if len(ordered_instances) == no_of_instances:
         all_instances_ready = True
     
     time.sleep(1)
@@ -159,28 +160,34 @@ Send message to SQS queue to trigger script
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 # For loop to send n messages to queue each with instance_id
+max_nonce = 2 ** 32
+search_split = math.ceil(max_nonce / len(ordered_instances))
 
-print(f'Sending message to input queue to initiate discovery in {instance_ids[0].id}...', end="")
+for i in range(0, len(ordered_instances)):
+    print(f'Sending message to input queue to initiate discovery in {ordered_instances[i].id}...', end="")
 
-message = {
-    "instance_id" : instance_ids[0].id,
-    "difficulty" : difficulty,
-    "start_nonce" : "0",
-    "end_nonce" : "20000"
-}
+    start_nonce = search_split * i
+    end_nonce = search_split * (i + 1)
+        
+    message = {
+        "instanceId" : ordered_instances[i].id,
+        "difficulty" : difficulty,
+        "startNonce" : start_nonce,
+        "endNonce" : end_nonce
+    }
 
-response = sqs.send_message(
-    QueueUrl=in_queue_url,
-    MessageBody=(
-        json.dumps(message)
-    ),
-    MessageGroupId='0',
-)
+    response = sqs.send_message(
+        QueueUrl=in_queue_url,
+        MessageBody=(
+            json.dumps(message)
+        ),
+        MessageGroupId='0',
+    )
 
-if response['ResponseMetadata']['HTTPStatusCode'] == 200:
-    print(f'SUCCESS!')
-else:
-    print(f'ERROR: Failed to send message to input queue')
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        print(f'SUCCESS!')
+    else:
+        print(f'ERROR: Failed to send message to input queue')
 
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -212,7 +219,7 @@ while not message_received:
 
 end_time = datetime.datetime.now()
 message_time_taken = (end_time - start_time).total_seconds()
-   
+
 print('SUCCESS!')
 
 print(f'Time taken to receive message: {message_time_taken}')
@@ -220,7 +227,27 @@ print(f'Time taken to receive message: {message_time_taken}')
 message_body = json.loads(result[0].body)
 nonce = message_body['nonce']
 block_binary = message_body['blockBinary']
+sender_instance_id = message_body['instanceId']
 time_taken = message_body['timeTaken']
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Cancel all running commands
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+# Get all running commands before cancelling
+running_commands = ssm.list_commands(
+    Filters=[
+        {
+            'key': 'Status',
+            'value': 'InProgress'
+        },
+    ]
+)
+
+for command in running_commands['Commands']:
+    command_id = command['CommandId']
+    ssm.cancel_command(CommandId=command_id)
+    
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Gracefully shutdown all running instances
@@ -256,8 +283,17 @@ print('----------------------------------------------------')
 print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
 
-print(f'Golden nonce: {nonce}')
-print(f'Data in binary: {block_binary}')
-print(f'Discovered in : {time_taken}s')
-print(f'Message delivery overhead: {message_time_taken - time_taken}s')
+sender_number = 0
 
+
+for i in range(0, len(ordered_instances)):
+    if ordered_instances[i].id == sender_instance_id:
+        sender_number = i
+    
+message_delivery_overhead = message_time_taken - float(time_taken)
+
+print(f'Golden nonce: {nonce}')
+print(f'Delivered by instance no. {sender_number} with id {sender_instance_id}')
+print(f'Data in binary: {block_binary}')
+print(f'Discovered in : {"{:.4f}".format(time_taken)}s')
+print(f'Message delivery overhead: {"{:.4f}".format(message_delivery_overhead)}s')

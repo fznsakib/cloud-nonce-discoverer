@@ -17,8 +17,10 @@ max_nonce = 2 ** 32
 def get_block(nonce):
     data = "COMSM0010cloud"
     # Convert data into binary. Remove first two characters ('0b')
-    bin_data = bin(int.from_bytes(data.encode(), 'big'))[2:]
-    block = str(bin_data) + str(nonce)
+    # bin_data = bin(int.from_bytes(data.encode(), 'big'))[2:]
+    # block = str(bin_data) + str(nonce)
+    block = data + str(nonce)
+    
     return block
 
 def get_block_hash(block):
@@ -32,7 +34,7 @@ def get_block_hash_binary(block_hash):
     # To get the leading zeroes in the binary representation, 
     # prepend a '1' to the hex string, and then strip the 
     # corresponding '1' from the output.
-    block_hash_binary = bin(int('1'+block_hash_string, 16))[3:]
+    block_hash_binary = bin(int('1'+block_hash_string, 16))[3:]    
     return block_hash_binary
 
 # Nonce discovery
@@ -42,10 +44,9 @@ if __name__ == "__main__":
         block = get_block(nonce)
         block_hash = get_block_hash(block)
         block_hash_binary = get_block_hash_binary(block_hash)
-
+        
         leading_zeroes = len(block_hash_binary.split('1', 1)[0])
-
-        # print(block_hash_binary)
+        
         print(f'number of leading zeroes: {leading_zeroes}')
 
         if (leading_zeroes == difficulty):

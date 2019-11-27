@@ -10,15 +10,18 @@ import datetime
 max_nonce = 2 ** 32
 
 parser = argparse.ArgumentParser(description='A golden nonce discoverer for blocks running concurrently using AWS.')
-parser.add_argument("--start", default=0, type=int, help="The number to start brute force search from")
-parser.add_argument("--end", default=max_nonce, type=int, help="The number to end brute force search at")
-parser.add_argument("--d", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
+parser.add_argument("--start", default=0, type=int, help="The number to start brute force search from.")
+parser.add_argument("--end", default=max_nonce, type=int, help="The number to end brute force search at.")
+parser.add_argument("--difficulty", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
+parser.add_argument("--id", default='', type=str, help="The ID of the EC2 instance the script will be run on.")
+
 
 args = parser.parse_args()
 
 start_nonce = args.start
 max_nonce = args.end
-difficulty = args.d
+difficulty = args.difficulty
+instance_id = args.id
 
 sqs = boto3.client('sqs', region_name='us-east-1')
 s3 = boto3.resource('s3')
@@ -31,9 +34,7 @@ def getQueueURL(queue_name):
 # Create block with the data and provided nonce
 def get_block(nonce):
     data = "COMSM0010cloud"
-    # Convert data into binary. Remove first two characters ('0b')
-    bin_data = bin(int.from_bytes(data.encode(), 'big'))[2:]
-    block = str(bin_data) + str(nonce)
+    block = data + str(nonce)
     return block
 
 def get_block_hash(block):
@@ -60,7 +61,8 @@ def nonce_found(golden_nonce, block_binary, time_taken):
     message = {
         'nonce' : golden_nonce,
         'blockBinary': block_binary,
-        'timeTaken': time_taken
+        'timeTaken': time_taken,
+        'instanceId': instance_id
     }
     response = sqs.send_message(
         QueueUrl=out_queue_url,
