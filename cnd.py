@@ -56,6 +56,12 @@ def nonce_found(golden_nonce, block_binary, time_taken):
     # f.write(str(golden_nonce))
     # f.close()
     
+    # NEW LOGGING SYSTEM
+    # 1. Upload log file with current variables to S3
+    # 2. Lambda on upload will cancel commands in other instances
+    # 3. cnd.py on termination will upload log file to S3
+    # 4. Send message to out_queue to notify local user
+    
     # Send result to queue for local machine to read
     out_queue_url = getQueueURL('outqueue.fifo')
     message = {
@@ -71,6 +77,8 @@ def nonce_found(golden_nonce, block_binary, time_taken):
         ),
         MessageGroupId='0',
     )
+    
+    # Upload log to S3
 
 # Nonce discovery
 if __name__ == "__main__":

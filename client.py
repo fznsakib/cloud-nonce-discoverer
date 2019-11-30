@@ -28,7 +28,7 @@ def instance_type(x):
 
 def time_type(x):
     x = int(x)
-    if x < 0:
+    if x < 1:
         raise argparse.ArgumentTypeError("Timeout value must be positive")
     return x
 
@@ -38,7 +38,7 @@ parser = argparse.ArgumentParser(description='''A client interfacing with AWS al
 parser.add_argument("-i", "--instances", default=1, type=instance_type, help="The number of EC2 instances to divide the task across.")
 parser.add_argument("-d", "--difficulty", default=10, type=int, help='''The difficulty of nonce discovery. This corresponds to the 
                     number of leading zero bits required in the hash.''')
-parser.add_argument("-t", "--timeout", default=6000, type=time_type, help="Limit of time before scram is initiated")
+parser.add_argument("-t", "--timeout", default=0, type=time_type, help="Limit of time in seconds before scram is initiated")
 
 args = parser.parse_args()
 
@@ -68,18 +68,36 @@ out_queue = sqs_resource.Queue(out_queue_url)
 Callbacks
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-def terminate(signum, frame):
+def user_terminate(signum, frame):
     signal.signal(signal.SIGINT, original_sigint)
     
-    print('Scram initialised, shutting down everything...', end="")
+    print('\nScram initiated by user')
+    print('Shutting down everything...', end="")
+    
     aws.scram(ssm, ec2, instances, [in_queue, out_queue])
+
     print('SUCCESS!')
-    print('Exiting...')    
+    print('Exiting...')
+    exit()
+    
+def timeout_terminate(signum, frame):    
+    print(f'\nTimeout limit of {timeout}s reached. Scram initiated.')
+    print('Shutting down everything...', end="")
+    
+    aws.scram(ssm, ec2, instances, [in_queue, out_queue])
+
+    print('SUCCESS!')
+    print('Exiting...')
     exit()
 
-original_sigint = signal.getsignal(signal.SIGINT)
-signal.signal(signal.SIGINT, terminate)
 
+original_sigint = signal.getsignal(signal.SIGINT)
+
+signal.signal(signal.SIGINT, user_terminate)
+signal.signal(signal.SIGALRM, timeout_terminate)
+
+if timeout != 0:
+    signal.alarm(timeout)
 
 print('----------------------------------------------------')
 print('-----------------------START------------------------')
@@ -88,7 +106,8 @@ print(f'-------------- Number of instances = {no_of_instances} -------------')
 print(f'------------------ Difficulty = {difficulty} -----------------')
 print('----------------------------------------------------')
 
-
+print(f'Number of instances = {no_of_instances} ||  Difficulty = {difficulty}')
+      
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Upload python script cnd.py to S3 bucket
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -196,20 +215,24 @@ aws.shutdownAllInstances(ec2, instances)
 print('SUCCESS!')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Delete queues
+Purge queues
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 print(f'Purging SQS queues...', end="")
 
 # Remove all outstanding messages in queues
-# response = in_queue.purge()
-# response = out_queue.purge()
 aws.purgeQueues([in_queue, out_queue])
 
 print('SUCCESS!')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Log Feedback
+Retrieve logs
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+# Get log files from S3
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Print Stats
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 print('----------------------------------------------------')
