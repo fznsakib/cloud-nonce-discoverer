@@ -7,6 +7,7 @@ import boto3
 import argparse
 import time
 import datetime
+from datetime import datetime
 import functools
 import aws
 from botocore.exceptions import ClientError
@@ -53,6 +54,8 @@ Initialise interface to AWS
 ec2 = boto3.client('ec2')
 sqs = boto3.client('sqs')
 ssm = boto3.client('ssm')
+logs = boto3.client('logs')
+
 s3 = boto3.resource('s3')
 ec2_resource = boto3.resource('ec2')
 sqs_resource = boto3.resource('sqs')
@@ -63,6 +66,23 @@ in_queue_url = aws.getQueueURL(sqs, 'inqueue.fifo')
 out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
+
+# log_group_name = 'pow_logs'
+
+# # Get name of Log Stream to log to
+# response = logs.describe_log_streams(
+#     logGroupName=log_group_name,
+#     logStreamNamePrefix='2019/11/30_21.14.18_i=4_d=15',
+#     orderBy='LogStreamName',
+#     descending=True,
+#     limit=1
+# )
+
+# log_stream_name = response['logStreams'][0]['logStreamName']
+
+# print(response['logStreams'][0]['uploadSequenceToken'])
+
+# exit()
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
@@ -119,6 +139,7 @@ s3.Bucket(BUCKET).upload_file("cnd.py", "cnd.py")
 
 print("SUCCESS!")
 
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise instances
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -152,6 +173,21 @@ Send message to SQS queue to trigger script
 max_nonce = 2 ** 32
 search_split = math.ceil(max_nonce / len(ordered_instances))
 
+now = datetime.now()
+formatted_datetime = now.strftime("%Y/%m/%d_%H.%M.%S")
+# log_group_name = f'PoW_{formatted_datetime}_i={no_of_instances}_d={difficulty}'
+log_group_name = f'PoW_{formatted_datetime}'
+
+# Create a log group
+response = logs.create_log_group(
+    logGroupName=log_group_name,
+    tags={
+        'instances': str(no_of_instances),
+        'difficulty': str(difficulty)
+    }
+)
+
+
 for i in range(0, len(ordered_instances)):
     print(f'Sending message to input queue to initiate discovery in {ordered_instances[i].id}...', end="")
 
@@ -162,7 +198,8 @@ for i in range(0, len(ordered_instances)):
         "instanceId" : ordered_instances[i].id,
         "difficulty" : difficulty,
         "startNonce" : start_nonce,
-        "endNonce" : end_nonce
+        "endNonce" : end_nonce,
+        "logGroupName" : log_group_name
     }
     
     response = aws.sendMessageToQueue(in_queue, message)
@@ -180,7 +217,7 @@ Read output queue to get back nonce
 print(f'Waiting for reply...', end="")
 
 message_received = False
-start_time = datetime.datetime.now()
+start_time = datetime.now()
 
 while not message_received: 
     message = aws.receiveMessageFromQueue(out_queue)
@@ -190,7 +227,7 @@ while not message_received:
         aws.deleteMessageFromQueue(out_queue, message)
         
         
-end_time = datetime.datetime.now()
+end_time = datetime.now()
 message_time_taken = (end_time - start_time).total_seconds()
 
 print('SUCCESS!')
@@ -210,6 +247,9 @@ Gracefully shutdown all running commands and instances
 print(f'Shutting down all running commands and EC2 instances...', end="")
 
 aws.cancelAllCommands(ssm)
+
+# Check number of logs
+
 aws.shutdownAllInstances(ec2, instances)
 
 print('SUCCESS!')

@@ -1,11 +1,16 @@
 import os
+import sys
 import boto3
 import json
+import signal
 import argparse
 import random
 import hashlib
 import binascii
 import datetime
+import time
+import atexit
+
 
 max_nonce = 2 ** 32
 
@@ -14,17 +19,63 @@ parser.add_argument("--start", default=0, type=int, help="The number to start br
 parser.add_argument("--end", default=max_nonce, type=int, help="The number to end brute force search at.")
 parser.add_argument("--difficulty", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
 parser.add_argument("--id", default='', type=str, help="The ID of the EC2 instance the script will be run on.")
+parser.add_argument("--log", default='', type=str, help="The name of the log group this script will log to.")
 
 
 args = parser.parse_args()
 
 start_nonce = args.start
+current_nonce = args.start
 max_nonce = args.end
 difficulty = args.difficulty
 instance_id = args.id
 
+log_group_name = args.log
+log_stream_name = instance_id
+
 sqs = boto3.client('sqs', region_name='us-east-1')
+logs = boto3.client('logs', region_name='us-east-1')
 s3 = boto3.resource('s3')
+
+sys.stdout.write('HELLOINSTART')
+
+
+# Create log stream
+response = logs.create_log_stream(
+    logGroupName=log_group_name,
+    logStreamName=log_stream_name
+)
+
+# def terminate(signum, frame):
+#     sys.stdout.write('HELLO')  
+#     message = {
+#         'success': 'False',
+#         'nonce' : current_nonce,
+#         'instanceId': instance_id
+#     }
+           
+#     timestamp = int(round(time.time() * 1000))
+    
+#     response = logs.put_log_events(
+#         logGroupName=log_group_name,
+#         logStreamName=log_stream_name,
+#         logEvents=[
+#             {
+#                 'timestamp': timestamp,
+#                 'message': json.dumps(message)
+#             },
+#         ],
+#     )
+    
+#     exit()
+
+
+# signal.signal(signal.SIGINT, terminate)
+
+def exit_handler():
+    sys.stdout.write('HELLOINEXITHANDLER')  
+    
+atexit.register(exit_handler)
 
 def getQueueURL(queue_name):
     response = sqs.get_queue_url(QueueName=queue_name)
@@ -78,13 +129,34 @@ def nonce_found(golden_nonce, block_binary, time_taken):
         MessageGroupId='0',
     )
     
+    
+    timestamp = int(round(time.time() * 1000))
+    
+    response = logs.put_log_events(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name,
+        logEvents=[
+            {
+                'timestamp': timestamp,
+                'message': json.dumps(message)
+            },
+        ],
+    )
+    
+    sys.stdout.write(str(message))
+    exit()
+    
+    # sys.stdout.write('nonce has been found: ' + str(golden_nonce))
+    
     # Upload log to S3
 
 # Nonce discovery
 if __name__ == "__main__":
+    
     start_time = datetime.datetime.now()
-    current_nonce = start_nonce
     golden_nonce = 0
+    
+    sys.stdout.write('HELLOINMAIN')
     
     # Brute force through all possible nonce values
     while (current_nonce <= max_nonce):
