@@ -67,30 +67,12 @@ out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 
-# log_group_name = 'pow_logs'
-
-# # Get name of Log Stream to log to
-# response = logs.describe_log_streams(
-#     logGroupName=log_group_name,
-#     logStreamNamePrefix='2019/11/30_21.14.18_i=4_d=15',
-#     orderBy='LogStreamName',
-#     descending=True,
-#     limit=1
-# )
-
-# log_stream_name = response['logStreams'][0]['logStreamName']
-
-# print(response['logStreams'][0]['uploadSequenceToken'])
-
-# exit()
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-def user_terminate(signum, frame):
-    signal.signal(signal.SIGINT, original_sigint)
-    
+def user_terminate(signum, frame):   
     print('\nScram initiated by user')
     print('Shutting down everything...', end="")
     
@@ -115,6 +97,10 @@ original_sigint = signal.getsignal(signal.SIGINT)
 
 signal.signal(signal.SIGINT, user_terminate)
 signal.signal(signal.SIGALRM, timeout_terminate)
+
+signal.signal(signal.SIGTERM, user_terminate)
+signal.signal(signal.SIGABRT, user_terminate)
+
 
 if timeout != 0:
     signal.alarm(timeout)
@@ -246,7 +232,21 @@ Gracefully shutdown all running commands and instances
 
 print(f'Shutting down all running commands and EC2 instances...', end="")
 
-aws.cancelAllCommands(ssm)
+instance_id_list = []
+for i in range(0, len(ordered_instances)):
+    instance_id_list.append(ordered_instances[i].id)
+
+cancel_command = 'killall python client.py'
+
+# Send command to cancel script
+ssmresponse = ssm.send_command(
+    InstanceIds=instance_id_list, 
+    DocumentName='AWS-RunShellScript',
+    Parameters= { 'commands': [cancel_command] }
+)
+
+time.sleep(5)
+# aws.cancelAllCommands(ssm)
 
 # Check number of logs
 

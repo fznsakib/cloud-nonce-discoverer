@@ -37,9 +37,6 @@ sqs = boto3.client('sqs', region_name='us-east-1')
 logs = boto3.client('logs', region_name='us-east-1')
 s3 = boto3.resource('s3')
 
-sys.stdout.write('HELLOINSTART')
-
-
 # Create log stream
 response = logs.create_log_stream(
     logGroupName=log_group_name,
@@ -70,12 +67,15 @@ response = logs.create_log_stream(
 #     exit()
 
 
-# signal.signal(signal.SIGINT, terminate)
 
 def exit_handler():
     sys.stdout.write('HELLOINEXITHANDLER')  
     
 atexit.register(exit_handler)
+
+signal.signal(signal.SIGINT, exit_handler)
+signal.signal(signal.SIGTERM, exit_handler)
+signal.signal(signal.SIGABRT, exit_handler)
 
 def getQueueURL(queue_name):
     response = sqs.get_queue_url(QueueName=queue_name)
@@ -155,11 +155,9 @@ if __name__ == "__main__":
     
     start_time = datetime.datetime.now()
     golden_nonce = 0
-    
-    sys.stdout.write('HELLOINMAIN')
-    
+        
     # Brute force through all possible nonce values
-    while (current_nonce <= max_nonce):
+    while (current_nonce <= max_nonce):        
         block = get_block(current_nonce)
         block_hash = get_block_hash(block)
         block_hash_binary = get_block_hash_binary(block_hash)
