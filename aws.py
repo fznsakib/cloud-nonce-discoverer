@@ -10,6 +10,10 @@ import boto3
 import time
 import json
 
+def uploadFileToBucket(s3, bucket, file_name, destination):
+    s3.Bucket(bucket).upload_file(file_name, destination)
+    
+
 def createFifoQueue(queue_name):
     response = sqs.create_queue(
         QueueName=queue_name,
@@ -73,7 +77,31 @@ def waitUntilInstancesReady(ec2_resource, no_of_instances):
     
     return ordered_instances
 
+def createLogGroup(logs, log_group_name):
+    # Check if log group exists before creating
+    log_groups = logs.describe_log_groups(
+        logGroupNamePrefix=log_group_name,
+        limit=1
+    )
+
+    if len(log_groups['logGroups']) == 0:
+        # If does not exist then create a log group
+        response = logs.create_log_group(
+            logGroupName=log_group_name,
+        )
+        
+        return response
+        
 def sendMessageToQueue(queue, message):
+    response = queue.send_message(
+        MessageBody=(
+            json.dumps(message)
+        )
+    )
+    
+    return response
+
+def sendMessageToFifoQueue(queue, message):
     response = queue.send_message(
         MessageBody=(
             json.dumps(message)
