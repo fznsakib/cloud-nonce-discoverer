@@ -197,20 +197,6 @@ def findNonce():
                 'instanceId': instance_id
             }
             
-            response = sqs.send_message(
-                QueueUrl=out_queue_url,
-                MessageBody=(
-                    json.dumps(message)
-                ),
-                MessageGroupId='0',
-            )
-            # response = ec2_queue.send_message(
-            #     MessageBody=(
-            #         json.dumps(message)
-            #     ),
-            #     MessageGroupId='0',
-            # )
-            
             timestamp = int(round(time.time() * 1000))
     
             response = logs.put_log_events(
@@ -223,6 +209,15 @@ def findNonce():
                     },
                 ],
             )
+            
+            response = sqs.send_message(
+                QueueUrl=out_queue_url,
+                MessageBody=(
+                    json.dumps(message)
+                ),
+                MessageGroupId='0',
+            )           
+
             
             # nonce_found(nonce, block_hash_binary, time_taken)
             i_found_nonce = True
@@ -237,7 +232,7 @@ def findNonce():
 if __name__ == "__main__":
     t1 = Thread(target=findNonce, daemon=True)
     t2 = Thread(target=waitForExternalNonceDiscovery, daemon=True)
-    # t = Thread(target = waitForExternalNonceDiscovery) 
+
     t1.start()
     t2.start()
     
@@ -248,27 +243,6 @@ if __name__ == "__main__":
     sys.exit()
     os.exit()
     
-    # start_time = datetime.datetime.now()
-    # golden_nonce = 0
-        
-    # # Brute force through all possible nonce values
-    # while (current_nonce <= max_nonce):        
-    #     block = get_block(current_nonce)
-    #     block_hash = get_block_hash(block)
-    #     block_hash_binary = get_block_hash_binary(block_hash)
-    #     leading_zeroes = len(block_hash_binary.split('1', 1)[0])
-
-    #     if (leading_zeroes == difficulty):
-    #         time_taken = (datetime.datetime.now() - start_time).total_seconds()
-    #         nonce_found(current_nonce, block_hash_binary, time_taken)
-    #         break
-        
-    #     current_nonce += 1
-    
-    
-        
-
-            
 
 
 
