@@ -100,6 +100,7 @@ Main threads
 def findNonce():
     global nonce_found
     global current_nonce
+    global start_time
     
     current_nonce = args.start
     start_time = datetime.datetime.now()
@@ -117,10 +118,13 @@ def findNonce():
             
             # Prepare message to log/send    
             message = {
-                'nonce' : current_nonce,
-                'blockBinary': block_hash_binary,
-                'timeTaken': time_taken,
-                'instanceId': instance_id
+                'success': True,
+                'instanceId'  : instance_id,
+                'goldenNonce' : current_nonce,
+                'goldenHash'  : block_hash.hexdigest(),
+                'searchTime'  : time_taken,
+                'searchStart': start_nonce,
+                'searchEnd'  : max_nonce
             }
                 
             # Upload log to stream
@@ -176,16 +180,18 @@ def waitForExternalNonceDiscovery():
                 }]
             )
     
-    sys.stdout.write('before access\n')
-        
+    time_taken = (datetime.datetime.now() - start_time).total_seconds()
+    
     # Prepare message to log
     message = {
-        'nonceFoundByMe' : False,
-        'currentNonce'   : current_nonce
+        'success': False,
+        'instanceId' : instance_id,
+        'lastNonce'  : current_nonce,
+        'searchTime' : time_taken,
+        'searchStart': start_nonce,
+        'searchEnd'  : max_nonce
     }
     
-    sys.stdout.write('after access\n')
-
     # Upload log to stream
     response = logs.put_log_events(
         logGroupName=log_group_name,

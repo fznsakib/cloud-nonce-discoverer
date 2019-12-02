@@ -68,7 +68,6 @@ in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 scram_queue = sqs_resource.Queue(scram_queue_url)
 
-        
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -106,6 +105,9 @@ print('----------------------------------------------------')
 
 print(f'Number of instances = {no_of_instances} ||  Difficulty = {difficulty}')
       
+# Start timer to calculate overall time taken to find golden nonce
+start_time = datetime.now()
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Upload python script cnd.py to S3 bucket
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -184,9 +186,6 @@ print(f'Waiting for reply...', end="")
 
 message_received = False
 
-# Start timer to calculate time taken to find golden nonce
-start_time = datetime.now()
-
 while not message_received: 
     message = aws.receiveMessageFromQueue(out_queue)
 
@@ -196,41 +195,17 @@ while not message_received:
         
         
 end_time = datetime.now()
-message_time_taken = (end_time - start_time).total_seconds()
+overall_time_taken = (end_time - start_time).total_seconds()
 
 print('SUCCESS!')
 
-print(f'Time taken to receive message: {message_time_taken}')
-
 # Get required data from message
 message_body = json.loads(message[0].body)
-nonce = message_body['nonce']
-block_binary = message_body['blockBinary']
 sender_instance_id = message_body['instanceId']
-time_taken = float(message_body['timeTaken'])
-
+search_time_taken = message_body['searchTime']
 
 # Shut down instance which sent message
 response = ec2.terminate_instances(InstanceIds=[sender_instance_id])
-
-
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Send back messages for log returns
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-# # Send n - 1 messages back, accounting for the instance which has
-# # already compeleted the task
-# for i in range(0, len(ordered_instances) - 1):
-#     # Empty message will suffice
-#     message = {}
-    
-#     response = aws.sendMessageToQueue(scram_queue, message)
-
-#     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
-#         print(f'SUCCESS!')
-#     else:
-#         print(f'ERROR: Failed to send message to input queue')
-    
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initiate scram
@@ -246,37 +221,65 @@ aws.shutdownAllInstances(ec2, instances)
 
 print('SUCCESS!')
 
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Push log for total time taken
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+# Get current log stream for successful instance
+response = logs.describe_log_streams(
+    logGroupName=log_group_name,
+    logStreamNamePrefix=sender_instance_id,
+    limit=1
+)
+
+log_stream = response['logStreams'][0]
+log_stream_name = log_stream['logStreamName']
+
+# Get upload sequence token to upload total time to log
+next_token = log_stream['uploadSequenceToken']
+
+cloud_overhead = 0
+
+if overall_time_taken > search_time_taken:
+    cloud_overhead = overall_time_taken - search_time_taken
+else:
+    cloud_overhead = search_time_taken - overall_time_taken
+    
+message = {
+    'totalTime' : overall_time_taken,
+    'cloudOverhead' : cloud_overhead
+}
+    
+response = logs.put_log_events(
+    logGroupName=log_group_name,
+    logStreamName=log_stream_name,
+    logEvents=[
+        {
+            'timestamp': int(round(time.time() * 1000)),
+            'message': json.dumps(message)
+        },
+    ],
+    sequenceToken=next_token
+)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Retrieve logs
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-# Get log files from S3
+response = logs.get_log_events(
+    logGroupName=log_group_name,
+    logStreamName=log_stream_name,
+    startFromHead=True
+)
 
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Print Stats
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+print(response)
+
+log = response['events'][0]['message']
+log = json.loads(log)
+
 
 print('----------------------------------------------------')
 print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
 
-sender_number = 0
-
-for i in range(0, len(ordered_instances)):
-    if ordered_instances[i].id == sender_instance_id:
-        sender_number = i
-
-message_delivery_overhead = 0
-
-if message_time_taken > time_taken:
-    message_delivery_overhead = message_time_taken - time_taken
-else:
-    message_delivery_overhead = time_taken - message_time_taken
-
-
-print(f'Golden nonce: {nonce}')
-print(f'Delivered by instance no. {sender_number} with id {sender_instance_id}')
-print(f'Data in binary: {block_binary}')
-print(f'Discovered in : {"{:.4f}".format(time_taken)}s')
-print(f'Message delivery overhead: {"{:.4f}".format(message_delivery_overhead)}s')
+print(json.dumps(log, indent=2, sort_keys=True))
