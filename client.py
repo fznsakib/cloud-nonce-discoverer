@@ -113,7 +113,7 @@ Upload python script cnd.py to S3 bucket
 
 print('Uploading cnd.py to S3 bucket...', end="")
 
-aws.uploadFileToBucket(s3, 'faizaanbucket', 'cnd.py', 'cnd.py')
+aws.uploadFileToBucket(s3, 'faizaanbucket', 'pow.py', 'pow.py')
 
 print("SUCCESS!")
 

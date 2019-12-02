@@ -11,16 +11,26 @@ import datetime
 import time
 from threading import Thread 
 
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+AWS functions
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+def getQueueURL(queue_name):
+    response = sqs.get_queue_url(QueueName=queue_name)
+    queue_url = response['QueueUrl']
+    return queue_url
 
 max_nonce = 2 ** 32
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Argument Parsing
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 parser = argparse.ArgumentParser(description='A golden nonce discoverer for blocks running concurrently using AWS.')
 parser.add_argument("--start", default=0, type=int, help="The number to start brute force search from.")
 parser.add_argument("--end", default=max_nonce, type=int, help="The number to end brute force search at.")
 parser.add_argument("--difficulty", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
 parser.add_argument("--id", default='', type=str, help="The ID of the EC2 instance the script will be run on.")
-parser.add_argument("--log", default='', type=str, help="The name of the log group this script will log to.")
-
 
 args = parser.parse_args()
 
@@ -30,16 +40,20 @@ max_nonce = args.end
 difficulty = args.difficulty
 instance_id = args.id
 
-log_group_name = args.log
+log_group_name = f'PoW_d_{difficulty}'
 log_stream_name = instance_id
+
+nonce_found = False
+nonce_found_externally = False
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Initialise interface to AWS
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 sqs = boto3.client('sqs', region_name='us-east-1')
 sqs_resource = boto3.resource('sqs', region_name='us-east-1')
 logs = boto3.client('logs', region_name='us-east-1')
 s3 = boto3.resource('s3')
-
-i_found_nonce = False
-they_found_nonce = False
 
 # Create log stream
 response = logs.create_log_stream(
@@ -47,17 +61,15 @@ response = logs.create_log_stream(
     logStreamName=log_stream_name
 )
 
-def getQueueURL(queue_name):
-    response = sqs.get_queue_url(QueueName=queue_name)
-    queue_url = response['QueueUrl']
-    return queue_url
-
-
 scram_queue_url = getQueueURL('scram_queue')
 out_queue_url = getQueueURL('outqueue.fifo')
 scram_queue = sqs_resource.Queue(scram_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Proof of Work helper functions
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 # Create block with the data and provided nonce
 def get_block(nonce):
@@ -80,8 +92,13 @@ def get_block_hash_binary(block_hash):
     return block_hash_binary
 
 
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Main threads
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+# Thread to search for golden nonce within search space
 def findNonce():
-    global i_found_nonce
+    global nonce_found
     start_time = datetime.datetime.now()
     nonce = args.start
         
@@ -92,9 +109,11 @@ def findNonce():
         block_hash_binary = get_block_hash_binary(block_hash)
         leading_zeroes = len(block_hash_binary.split('1', 1)[0])
 
+        # If the golden nonce is found
         if (leading_zeroes == difficulty):
             time_taken = (datetime.datetime.now() - start_time).total_seconds()
-                                    
+            
+            # Prepare message to log/send    
             message = {
                 'nonce' : nonce,
                 'blockBinary': block_hash_binary,
@@ -102,6 +121,7 @@ def findNonce():
                 'instanceId': instance_id
             }
                 
+            # Upload log to stream
             response = logs.put_log_events(
                 logGroupName=log_group_name,
                 logStreamName=log_stream_name,
@@ -113,6 +133,8 @@ def findNonce():
                 ],
             )
             
+            # Send message to out_queue to notify the client that nonce 
+            # has been found
             response = out_queue.send_message(
                 MessageBody=(
                     json.dumps(message)
@@ -120,43 +142,44 @@ def findNonce():
                 MessageGroupId='0',
             )
 
-            
-            i_found_nonce = True
-            sys.stdout.write('NONCE FOUND ' + str(nonce))
+            nonce_found = True
             break
         
         nonce += 1
     
     sys.exit(1)
            
-           
+# Thread acting as listener to scram_queue
 def waitForExternalNonceDiscovery():
-    global they_found_nonce
+    global nonce_found_externally
+    
     message_received = False
     
+    # Wait for notification for if nonce if found elsewhere
     while not message_received: 
         message = scram_queue.receive_messages(
             MaxNumberOfMessages=1,
             VisibilityTimeout=10,
             WaitTimeSeconds=20,
         )
-
-        sys.stdout.write('CANT FIND MESSAGE\n')
         
+        # Delete message from queue
         if message:
-            sys.stdout.write('EC2 MESSAGE RECEIVED FROM OTHER INSTANCE\n')
             message_received = True
+            
             response = scram_queue.delete_messages(
                 Entries=[{
                     'Id': message[0].message_id,
                     'ReceiptHandle': message[0].receipt_handle
                 }]
             )
-        
+    
+    # Prepare message to log
     message = {
         'nonceFoundByMe' : False
     }
     
+    # Upload log to stream
     response = logs.put_log_events(
         logGroupName=log_group_name,
         logStreamName=log_stream_name,
@@ -168,13 +191,21 @@ def waitForExternalNonceDiscovery():
         ],
     )
     
-    they_found_nonce = True
-    sys.stdout.write('NONCE FOUND BY OTHER INSTANCE\n')
+    nonce_found_externally = True
     sys.exit(1)  
 
 
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+pow.py main()
 
-# Nonce discovery
+# This Proof of Work script initiates two threads:
+#   1. Search for the golden nonce within the given search space
+#   2. Listen to scram_queue for when logging and shut down required
+
+# The program will finish at the event of completion of either thread,
+# signalling the discovery of the golden nonce to a scram request.
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
 if __name__ == "__main__":
     t1 = Thread(target=findNonce, daemon=True)
     t2 = Thread(target=waitForExternalNonceDiscovery, daemon=True)
@@ -182,9 +213,9 @@ if __name__ == "__main__":
     t1.start()
     t2.start()
     
-    while (i_found_nonce == False) and (they_found_nonce == False):
+    while (nonce_found == False) and (nonce_found_externally == False):
         pass
-        
+    
     sys.stdout.write('EXIT PROGRAM')
     sys.exit()
     os.exit()
