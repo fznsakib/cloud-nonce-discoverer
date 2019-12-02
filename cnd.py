@@ -53,18 +53,10 @@ def getQueueURL(queue_name):
     return queue_url
 
 
-ec2_queue_url = getQueueURL('scram_queue')
-ec2_queue = sqs_resource.Queue(ec2_queue_url)
-
-# def terminate(signum, frame):
-#     sys.stdout.write('HELLO IN EXIT HANDLER')  
-#     exit()
-    
-
-# signal.signal(signal.SIGINT, terminate)
-# signal.signal(signal.SIGTERM, terminate)
-# signal.signal(signal.SIGABRT, terminate)
-
+scram_queue_url = getQueueURL('scram_queue')
+out_queue_url = getQueueURL('outqueue.fifo')
+scram_queue = sqs_resource.Queue(scram_queue_url)
+out_queue = sqs_resource.Queue(out_queue_url)
 
 
 # Create block with the data and provided nonce
@@ -87,91 +79,6 @@ def get_block_hash_binary(block_hash):
     block_hash_binary = bin(int('1'+block_hash_string, 16))[3:]
     return block_hash_binary
 
-def nonce_found(golden_nonce, block_binary, time_taken):
-    
-    # Send result to queue for local machine to read
-    out_queue_url = getQueueURL('outqueue.fifo')
-    message = {
-        'nonce' : golden_nonce,
-        'blockBinary': block_binary,
-        'timeTaken': time_taken,
-        'instanceId': instance_id
-    }
-    response = sqs.send_message(
-        QueueUrl=out_queue_url,
-        MessageBody=(
-            json.dumps(message)
-        ),
-        MessageGroupId='0',
-    )
-    
-    response = ec2_queue.send_message(
-        MessageBody=(
-            json.dumps(message)
-        ),
-        MessageGroupId='0',
-    )
-    
-    
-    timestamp = int(round(time.time() * 1000))
-    
-    response = logs.put_log_events(
-        logGroupName=log_group_name,
-        logStreamName=log_stream_name,
-        logEvents=[
-            {
-                'timestamp': timestamp,
-                'message': json.dumps(message)
-            },
-        ],
-    )
-    sys.stdout.write('NONCE FOUND')  
-    sys.exit(1)
-
-def waitForExternalNonceDiscovery():
-    global they_found_nonce
-    message_received = False
-    
-    while not message_received: 
-        message = ec2_queue.receive_messages(
-            MaxNumberOfMessages=1,
-            VisibilityTimeout=10,
-            WaitTimeSeconds=20,
-        )
-
-        sys.stdout.write('CANT FIND MESSAGE\n')
-        
-        if message:
-            sys.stdout.write('EC2 MESSAGE RECEIVED FROM OTHER INSTANCE\n')
-            message_received = True
-            response = ec2_queue.delete_messages(
-                Entries=[{
-                    'Id': message[0].message_id,
-                    'ReceiptHandle': message[0].receipt_handle
-                }]
-            )
-    
-    timestamp = int(round(time.time() * 1000))
-    
-    message = {
-        'nonceFoundByMe' : False
-    }
-    
-    response = logs.put_log_events(
-        logGroupName=log_group_name,
-        logStreamName=log_stream_name,
-        logEvents=[
-            {
-                'timestamp': timestamp,
-                'message': json.dumps(message)
-            },
-        ],
-    )
-    
-    they_found_nonce = True
-    sys.stdout.write('NONCE FOUND BY OTHER INSTANCE\n')
-    sys.exit(1)  
-
 
 def findNonce():
     global i_found_nonce
@@ -187,39 +94,33 @@ def findNonce():
 
         if (leading_zeroes == difficulty):
             time_taken = (datetime.datetime.now() - start_time).total_seconds()
-            
-            out_queue_url = getQueueURL('outqueue.fifo')
-            
+                                    
             message = {
                 'nonce' : nonce,
                 'blockBinary': block_hash_binary,
                 'timeTaken': time_taken,
                 'instanceId': instance_id
             }
-            
-            timestamp = int(round(time.time() * 1000))
-    
+                
             response = logs.put_log_events(
                 logGroupName=log_group_name,
                 logStreamName=log_stream_name,
                 logEvents=[
                     {
-                        'timestamp': timestamp,
+                        'timestamp': int(round(time.time() * 1000)),
                         'message': json.dumps(message)
                     },
                 ],
             )
             
-            response = sqs.send_message(
-                QueueUrl=out_queue_url,
+            response = out_queue.send_message(
                 MessageBody=(
                     json.dumps(message)
                 ),
                 MessageGroupId='0',
-            )           
+            )
 
             
-            # nonce_found(nonce, block_hash_binary, time_taken)
             i_found_nonce = True
             sys.stdout.write('NONCE FOUND ' + str(nonce))
             break
@@ -228,6 +129,51 @@ def findNonce():
     
     sys.exit(1)
            
+           
+def waitForExternalNonceDiscovery():
+    global they_found_nonce
+    message_received = False
+    
+    while not message_received: 
+        message = scram_queue.receive_messages(
+            MaxNumberOfMessages=1,
+            VisibilityTimeout=10,
+            WaitTimeSeconds=20,
+        )
+
+        sys.stdout.write('CANT FIND MESSAGE\n')
+        
+        if message:
+            sys.stdout.write('EC2 MESSAGE RECEIVED FROM OTHER INSTANCE\n')
+            message_received = True
+            response = scram_queue.delete_messages(
+                Entries=[{
+                    'Id': message[0].message_id,
+                    'ReceiptHandle': message[0].receipt_handle
+                }]
+            )
+        
+    message = {
+        'nonceFoundByMe' : False
+    }
+    
+    response = logs.put_log_events(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name,
+        logEvents=[
+            {
+                'timestamp': int(round(time.time() * 1000)),
+                'message': json.dumps(message)
+            },
+        ],
+    )
+    
+    they_found_nonce = True
+    sys.stdout.write('NONCE FOUND BY OTHER INSTANCE\n')
+    sys.exit(1)  
+
+
+
 # Nonce discovery
 if __name__ == "__main__":
     t1 = Thread(target=findNonce, daemon=True)
