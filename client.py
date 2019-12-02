@@ -48,6 +48,7 @@ difficulty = args.difficulty
 timeout = args.timeout
 instances = []
 
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -64,10 +65,12 @@ sqs_resource = boto3.resource('sqs')
 # Use create_event_source_mapping to create queues?
 in_queue_url = aws.getQueueURL(sqs, 'inqueue.fifo')
 out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
+ec2_queue_url = aws.getQueueURL(sqs, 'scram_queue')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
+ec2_queue = sqs_resource.Queue(ec2_queue_url)
 
-
+        
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -92,15 +95,11 @@ def timeout_terminate(signum, frame):
     print('Exiting...')
     exit()
 
-
-original_sigint = signal.getsignal(signal.SIGINT)
+# use for terminate options
+# signal.signal(signal.SIGINT, user_terminate, args=("hello"))
 
 signal.signal(signal.SIGINT, user_terminate)
 signal.signal(signal.SIGALRM, timeout_terminate)
-
-signal.signal(signal.SIGTERM, user_terminate)
-signal.signal(signal.SIGABRT, user_terminate)
-
 
 if timeout != 0:
     signal.alarm(timeout)
@@ -124,7 +123,6 @@ BUCKET = "faizaanbucket"
 s3.Bucket(BUCKET).upload_file("cnd.py", "cnd.py")
 
 print("SUCCESS!")
-
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise instances
@@ -159,19 +157,22 @@ Send message to SQS queue to trigger script
 max_nonce = 2 ** 32
 search_split = math.ceil(max_nonce / len(ordered_instances))
 
+# Create log group name according to current time
 now = datetime.now()
 formatted_datetime = now.strftime("%Y/%m/%d_%H.%M.%S")
-# log_group_name = f'PoW_{formatted_datetime}_i={no_of_instances}_d={difficulty}'
-log_group_name = f'PoW_{formatted_datetime}'
+log_group_name = f'PoW_d_{difficulty}'
 
-# Create a log group
-response = logs.create_log_group(
-    logGroupName=log_group_name,
-    tags={
-        'instances': str(no_of_instances),
-        'difficulty': str(difficulty)
-    }
+# Check if log group exists before creating
+log_groups = logs.describe_log_groups(
+    logGroupNamePrefix=f'PoW_d_{difficulty}',
+    limit=1
 )
+
+if len(log_groups['logGroups']) == 0:
+    # If does not exist then create a log group
+    response = logs.create_log_group(
+        logGroupName=log_group_name,
+    )
 
 
 for i in range(0, len(ordered_instances)):
@@ -226,26 +227,59 @@ block_binary = message_body['blockBinary']
 sender_instance_id = message_body['instanceId']
 time_taken = message_body['timeTaken']
 
+
+# SHUT DOWN INSTANCE THAT JUST SENT
+response = ec2.terminate_instances(InstanceIds=[sender_instance_id])
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Send back messages for log returns
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+
+
+for i in range(0, len(ordered_instances) - 1):
+    message = {
+        "returnLogs" : "True"
+    }
+    
+    # response = aws.sendMessageToQueue(ec2_queue, message)
+    
+    response = ec2_queue.send_message(
+        MessageBody=(
+            json.dumps(message)
+        )
+        # MessageGroupId=ordered_instances[i].id,
+    )
+
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        print(f'SUCCESS!')
+    else:
+        print(f'ERROR: Failed to send message to input queue')
+    
+
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Gracefully shutdown all running commands and instances
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 print(f'Shutting down all running commands and EC2 instances...', end="")
 
-instance_id_list = []
-for i in range(0, len(ordered_instances)):
-    instance_id_list.append(ordered_instances[i].id)
+# instance_id_list = []
+# for i in range(0, len(ordered_instances)):
+#     instance_id_list.append(ordered_instances[i].id)
 
-cancel_command = 'killall python client.py'
+# cancel_command = 'killall python3 cnd.py'
 
 # Send command to cancel script
-ssmresponse = ssm.send_command(
-    InstanceIds=instance_id_list, 
-    DocumentName='AWS-RunShellScript',
-    Parameters= { 'commands': [cancel_command] }
-)
+# ssmresponse = ssm.send_command(
+#     InstanceIds=instance_id_list, 
+#     DocumentName='AWS-RunShellScript',
+#     Parameters= { 'commands': [cancel_command] }
+# )
 
-time.sleep(5)
+time.sleep(10)
+
 # aws.cancelAllCommands(ssm)
 
 # Check number of logs
@@ -279,14 +313,21 @@ print('----------------------------------------------------')
 print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
 
-sender_number = 0
 
+sender_number = 0
 
 for i in range(0, len(ordered_instances)):
     if ordered_instances[i].id == sender_instance_id:
         sender_number = i
-    
-message_delivery_overhead = message_time_taken - float(time_taken)
+
+message_delivery_overhead = 0
+time_taken = float(time_taken)
+
+if message_time_taken > time_taken:
+    message_delivery_overhead = message_time_taken - time_taken
+else:
+    message_delivery_overhead = time_taken - message_time_taken
+
 
 print(f'Golden nonce: {nonce}')
 print(f'Delivered by instance no. {sender_number} with id {sender_instance_id}')
