@@ -35,7 +35,6 @@ parser.add_argument("--id", default='', type=str, help="The ID of the EC2 instan
 args = parser.parse_args()
 
 start_nonce = args.start
-current_nonce = args.start
 max_nonce = args.end
 difficulty = args.difficulty
 instance_id = args.id
@@ -45,6 +44,7 @@ log_stream_name = instance_id
 
 nonce_found = False
 nonce_found_externally = False
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""
 Initialise interface to AWS
@@ -99,12 +99,14 @@ Main threads
 # Thread to search for golden nonce within search space
 def findNonce():
     global nonce_found
+    global current_nonce
+    
+    current_nonce = args.start
     start_time = datetime.datetime.now()
-    nonce = args.start
         
     # Brute force through all possible nonce values
-    while (nonce <= max_nonce):        
-        block = get_block(nonce)
+    while (current_nonce <= max_nonce):        
+        block = get_block(current_nonce)
         block_hash = get_block_hash(block)
         block_hash_binary = get_block_hash_binary(block_hash)
         leading_zeroes = len(block_hash_binary.split('1', 1)[0])
@@ -115,7 +117,7 @@ def findNonce():
             
             # Prepare message to log/send    
             message = {
-                'nonce' : nonce,
+                'nonce' : current_nonce,
                 'blockBinary': block_hash_binary,
                 'timeTaken': time_taken,
                 'instanceId': instance_id
@@ -145,7 +147,7 @@ def findNonce():
             nonce_found = True
             break
         
-        nonce += 1
+        current_nonce += 1
     
     sys.exit(1)
            
@@ -174,11 +176,16 @@ def waitForExternalNonceDiscovery():
                 }]
             )
     
+    sys.stdout.write('before access\n')
+        
     # Prepare message to log
     message = {
-        'nonceFoundByMe' : False
+        'nonceFoundByMe' : False,
+        'currentNonce'   : current_nonce
     }
     
+    sys.stdout.write('after access\n')
+
     # Upload log to stream
     response = logs.put_log_events(
         logGroupName=log_group_name,

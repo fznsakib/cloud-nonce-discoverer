@@ -111,7 +111,7 @@ print(f'Number of instances = {no_of_instances} ||  Difficulty = {difficulty}')
 Upload python script cnd.py to S3 bucket
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-print('Uploading cnd.py to S3 bucket...', end="")
+print('Uploading pow.py to S3 bucket...', end="")
 
 aws.uploadFileToBucket(s3, 'faizaanbucket', 'pow.py', 'pow.py')
 
