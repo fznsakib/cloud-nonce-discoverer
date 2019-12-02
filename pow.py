@@ -43,7 +43,7 @@ log_group_name = f'PoW_d_{difficulty}'
 log_stream_name = instance_id
 
 nonce_found = False
-nonce_found_externally = False
+scram_requested = False
 
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -153,7 +153,7 @@ def findNonce():
            
 # Thread acting as listener to scram_queue
 def waitForExternalNonceDiscovery():
-    global nonce_found_externally
+    global scram_requested
     
     message_received = False
     
@@ -198,7 +198,7 @@ def waitForExternalNonceDiscovery():
         ],
     )
     
-    nonce_found_externally = True
+    scram_requested = True
     sys.exit(1)  
 
 
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     t1.start()
     t2.start()
     
-    while (nonce_found == False) and (nonce_found_externally == False):
+    while (nonce_found == False) and (scram_requested == False):
         pass
     
     sys.stdout.write('EXIT PROGRAM')

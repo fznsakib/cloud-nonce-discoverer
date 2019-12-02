@@ -48,7 +48,6 @@ difficulty = args.difficulty
 timeout = args.timeout
 instances = []
 
-
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -62,7 +61,6 @@ ec2_resource = boto3.resource('ec2')
 sqs_resource = boto3.resource('sqs')
 
 # SQS Queues
-# Use create_event_source_mapping to create queues?
 in_queue_url = aws.getQueueURL(sqs, 'inqueue.fifo')
 out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
 scram_queue_url = aws.getQueueURL(sqs, 'scram_queue')
@@ -79,11 +77,12 @@ def terminate(signum, frame):
     # User terminated program with Ctrl + C interrupt
     if (signum == 2):
         print('\nScram initiated by user')
+        
     # Timeout terminated program
     elif (signum == 14):
         print(f'\nTimeout limit of {timeout}s reached. Scram initiated.')
     
-    print('Shutting down everything...', end="")
+    print('Shutting down everything and asking back for logs...', end="")
     
     aws.scram(ssm, ec2, instances, [in_queue, out_queue, scram_queue])
 
@@ -219,18 +218,18 @@ response = ec2.terminate_instances(InstanceIds=[sender_instance_id])
 Send back messages for log returns
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-# Send n - 1 messages back, accounting for the instance which has
-# already compeleted the task
-for i in range(0, len(ordered_instances) - 1):
-    # Empty message will suffice
-    message = {}
+# # Send n - 1 messages back, accounting for the instance which has
+# # already compeleted the task
+# for i in range(0, len(ordered_instances) - 1):
+#     # Empty message will suffice
+#     message = {}
     
-    response = aws.sendMessageToQueue(scram_queue, message)
+#     response = aws.sendMessageToQueue(scram_queue, message)
 
-    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
-        print(f'SUCCESS!')
-    else:
-        print(f'ERROR: Failed to send message to input queue')
+#     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+#         print(f'SUCCESS!')
+#     else:
+#         print(f'ERROR: Failed to send message to input queue')
     
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''

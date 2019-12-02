@@ -152,8 +152,17 @@ def shutdownAllInstances(ec2, instances):
 def purgeQueues(queues):
     for queue in queues:
         queue.purge()
-        
+
 def scram(ssm, ec2, instances, queues):
+    
+    # Notify instances to report upload logs before shutdown
+    for i in range(0, len(instances)):
+        message = {}
+        scram_queue = queues[2]
+        
+        response = sendMessageToQueue(queues[2], message)
+          
+    # Shutdown and reset all AWS resources
     cancelAllCommands(ssm)
     shutdownAllInstances(ec2, instances)
     purgeQueues(queues)
