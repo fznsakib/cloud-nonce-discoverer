@@ -7,9 +7,10 @@ import boto3
 import argparse
 import time
 import datetime
-from datetime import datetime
 import functools
 import aws
+from datetime import datetime
+from jsonmerge import merge
 from botocore.exceptions import ClientError
 
 # Disable output buffering
@@ -67,6 +68,7 @@ scram_queue_url = aws.getQueueURL(sqs, 'scram_queue')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 scram_queue = sqs_resource.Queue(scram_queue_url)
+
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
@@ -155,6 +157,9 @@ search_split = math.ceil(max_nonce / len(ordered_instances))
 log_group_name = f'PoW_d_{difficulty}'
 aws.createLogGroup(logs, log_group_name)
 
+# Used for creating log stream name
+log_stream_prefix = start_time.strftime('%Y/%m/%d-[%H.%M.%S]')
+
 # Send off messages to input queue
 for i in range(0, len(ordered_instances)):
     print(f'Sending message to input queue to initiate discovery in {ordered_instances[i].id}...', end="")
@@ -162,13 +167,13 @@ for i in range(0, len(ordered_instances)):
     # Calculate search space for instance
     start_nonce = search_split * i
     end_nonce = search_split * (i + 1)
-        
+            
     message = {
-        "instanceId"   : ordered_instances[i].id,
-        "difficulty"   : difficulty,
-        "startNonce"   : start_nonce,
-        "endNonce"     : end_nonce,
-        "logGroupName" : log_group_name
+        "instanceId"    : ordered_instances[i].id,
+        "difficulty"    : difficulty,
+        "startNonce"    : start_nonce,
+        "endNonce"      : end_nonce,
+        "dateTime"      : log_stream_prefix
     }
     
     response = aws.sendMessageToFifoQueue(in_queue, message)
@@ -195,7 +200,7 @@ while not message_received:
         
         
 end_time = datetime.now()
-overall_time_taken = (end_time - start_time).total_seconds()
+
 
 print('SUCCESS!')
 
@@ -225,61 +230,73 @@ print('SUCCESS!')
 Push log for total time taken
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-# Get current log stream for successful instance
-response = logs.describe_log_streams(
-    logGroupName=log_group_name,
-    logStreamNamePrefix=sender_instance_id,
-    limit=1
-)
+# Calculate total time taken and overhead from using cloud
+overall_time_taken = (end_time - start_time).total_seconds()
+cloud_overhead = overall_time_taken - search_time_taken
 
-log_stream = response['logStreams'][0]
-log_stream_name = log_stream['logStreamName']
-
-# Get upload sequence token to upload total time to log
-next_token = log_stream['uploadSequenceToken']
-
-cloud_overhead = 0
-
-if overall_time_taken > search_time_taken:
-    cloud_overhead = overall_time_taken - search_time_taken
-else:
-    cloud_overhead = search_time_taken - overall_time_taken
-    
 message = {
     'totalTime' : overall_time_taken,
     'cloudOverhead' : cloud_overhead
 }
-    
-response = logs.put_log_events(
+
+# Get log stream for successful instance(s)
+response = logs.describe_log_streams(
     logGroupName=log_group_name,
-    logStreamName=log_stream_name,
-    logEvents=[
-        {
-            'timestamp': int(round(time.time() * 1000)),
-            'message': json.dumps(message)
-        },
-    ],
-    sequenceToken=next_token
+    logStreamNamePrefix=log_stream_prefix
 )
+
+log_streams = response['logStreams']
+
+# Push log event for calculated times for log streams
+for log_stream in log_streams:
+    response = logs.put_log_events(
+        logGroupName=log_group_name,
+        logStreamName=log_stream['logStreamName'],
+        logEvents=[
+            {
+                'timestamp': int(round(time.time() * 1000)),
+                'message': json.dumps(message)
+            },
+        ],
+        sequenceToken=log_stream['uploadSequenceToken']
+    )
+    
+# Allow some time for log events to be pushed
+time.sleep(2)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Retrieve logs
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-response = logs.get_log_events(
-    logGroupName=log_group_name,
-    logStreamName=log_stream_name,
-    startFromHead=True
-)
+log_events = []
 
-print(response)
+for log_stream in log_streams:
+    response = logs.get_log_events(
+        logGroupName=log_group_name,
+        logStreamName=log_stream['logStreamName'],
+        startFromHead=False
+    )
+    print(response)
+    event_1 = json.loads(response['events'][0]['message'])
+    event_2 = json.loads(response['events'][1]['message'])
+    
+    log = merge(event_1, event_2)
+    
+    # event_1 = dict(response['events'][0]['message'])
+    # event_2 = dict(response['events'][1]['message'])
+        
+    log_events.append(log)
 
-log = response['events'][0]['message']
-log = json.loads(log)
+
+# log = response['events'][0]['message']
+# log = json.loads(log)
 
 
 print('----------------------------------------------------')
 print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
 
-print(json.dumps(log, indent=2, sort_keys=True))
+for log in log_events:
+    print(json.dumps(log, indent=2))
+    
+# print(json.dumps(log, indent=2, sort_keys=True))

@@ -31,6 +31,7 @@ parser.add_argument("--start", default=0, type=int, help="The number to start br
 parser.add_argument("--end", default=max_nonce, type=int, help="The number to end brute force search at.")
 parser.add_argument("--difficulty", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
 parser.add_argument("--id", default='', type=str, help="The ID of the EC2 instance the script will be run on.")
+parser.add_argument("--datetime", default='', type=str, help="The datetime represents the start of the overall process. Used as an identifier for the log for this process.")
 
 args = parser.parse_args()
 
@@ -38,13 +39,13 @@ start_nonce = args.start
 max_nonce = args.end
 difficulty = args.difficulty
 instance_id = args.id
+date_time = args.datetime
 
 log_group_name = f'PoW_d_{difficulty}'
-log_stream_name = instance_id
+log_stream_name = f'{date_time}-{instance_id}'
 
 nonce_found = False
 scram_requested = False
-
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""
 Initialise interface to AWS
@@ -54,12 +55,6 @@ sqs = boto3.client('sqs', region_name='us-east-1')
 sqs_resource = boto3.resource('sqs', region_name='us-east-1')
 logs = boto3.client('logs', region_name='us-east-1')
 s3 = boto3.resource('s3')
-
-# Create log stream
-response = logs.create_log_stream(
-    logGroupName=log_group_name,
-    logStreamName=log_stream_name
-)
 
 scram_queue_url = getQueueURL('scram_queue')
 out_queue_url = getQueueURL('outqueue.fifo')
@@ -126,6 +121,12 @@ def findNonce():
                 'searchStart': start_nonce,
                 'searchEnd'  : max_nonce
             }
+            
+            # Create log stream
+            response = logs.create_log_stream(
+                logGroupName=log_group_name,
+                logStreamName=log_stream_name
+            )
                 
             # Upload log to stream
             response = logs.put_log_events(
@@ -191,6 +192,12 @@ def waitForExternalNonceDiscovery():
         'searchStart': start_nonce,
         'searchEnd'  : max_nonce
     }
+    
+    # Create log stream
+    response = logs.create_log_stream(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name
+    )
     
     # Upload log to stream
     response = logs.put_log_events(
