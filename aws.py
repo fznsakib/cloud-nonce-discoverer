@@ -10,6 +10,10 @@ import boto3
 import time
 import json
 
+def uploadFileToBucket(s3, bucket, file_name, destination):
+    s3.Bucket(bucket).upload_file(file_name, destination)
+    
+
 def createFifoQueue(queue_name):
     response = sqs.create_queue(
         QueueName=queue_name,
@@ -73,7 +77,54 @@ def waitUntilInstancesReady(ec2_resource, no_of_instances):
     
     return ordered_instances
 
+def createLogGroup(logs, log_group_name):
+    # Check if log group exists before creating
+    log_groups = logs.describe_log_groups(
+        logGroupNamePrefix=log_group_name,
+        limit=1
+    )
+
+    if len(log_groups['logGroups']) == 0:
+        # If does not exist then create a log group
+        response = logs.create_log_group(
+            logGroupName=log_group_name,
+        )
+        
+        return response
+        
+        
+def createLogStream(logs, log_group_name, log_stream_name):
+    response = logs.create_log_stream(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name
+    )
+    return response
+
+def putLogEvent(logs, log_group_name, log_stream_name, message):
+    response = logs.put_log_events(
+    logGroupName=log_group_name,
+    logStreamName=log_stream_name,
+    logEvents=[
+            {
+                'timestamp': int(round(time.time() * 1000)),
+                'message': json.dumps(message)
+            },
+        ]
+    )
+    
+    return response
+
+
 def sendMessageToQueue(queue, message):
+    response = queue.send_message(
+        MessageBody=(
+            json.dumps(message)
+        )
+    )
+    
+    return response
+
+def sendMessageToFifoQueue(queue, message):
     response = queue.send_message(
         MessageBody=(
             json.dumps(message)
@@ -98,6 +149,7 @@ def deleteMessageFromQueue(queue, message):
             'ReceiptHandle': message[0].receipt_handle
         }]
     )
+
     
 def cancelAllCommands(ssm):
     # Get all running commands before cancelling
@@ -124,8 +176,17 @@ def shutdownAllInstances(ec2, instances):
 def purgeQueues(queues):
     for queue in queues:
         queue.purge()
-        
+
 def scram(ssm, ec2, instances, queues):
+    
+    # Notify instances to report upload logs before shutdown
+    for i in range(0, len(instances)):
+        message = {}
+        scram_queue = queues[2]
+        
+        response = sendMessageToQueue(queues[2], message)
+          
+    # Shutdown and reset all AWS resources
     cancelAllCommands(ssm)
     shutdownAllInstances(ec2, instances)
     purgeQueues(queues)

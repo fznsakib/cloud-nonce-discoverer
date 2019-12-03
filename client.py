@@ -7,9 +7,10 @@ import boto3
 import argparse
 import time
 import datetime
-from datetime import datetime
 import functools
 import aws
+from datetime import datetime
+from jsonmerge import merge
 from botocore.exceptions import ClientError
 
 # Disable output buffering
@@ -61,46 +62,38 @@ ec2_resource = boto3.resource('ec2')
 sqs_resource = boto3.resource('sqs')
 
 # SQS Queues
-# Use create_event_source_mapping to create queues?
 in_queue_url = aws.getQueueURL(sqs, 'inqueue.fifo')
 out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
+scram_queue_url = aws.getQueueURL(sqs, 'scram_queue')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
+scram_queue = sqs_resource.Queue(scram_queue_url)
 
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-def user_terminate(signum, frame):   
-    print('\nScram initiated by user')
-    print('Shutting down everything...', end="")
+def terminate(signum, frame):      
+    # User terminated program with Ctrl + C interrupt
+    if (signum == 2):
+        print('\nScram initiated by user')
+        
+    # Timeout terminated program
+    elif (signum == 14):
+        print(f'\nTimeout limit of {timeout}s reached. Scram initiated.')
     
-    aws.scram(ssm, ec2, instances, [in_queue, out_queue])
+    print('Shutting down everything and asking back for logs...', end="")
+    
+    aws.scram(ssm, ec2, instances, [in_queue, out_queue, scram_queue])
 
     print('SUCCESS!')
     print('Exiting...')
     exit()
     
-def timeout_terminate(signum, frame):    
-    print(f'\nTimeout limit of {timeout}s reached. Scram initiated.')
-    print('Shutting down everything...', end="")
-    
-    aws.scram(ssm, ec2, instances, [in_queue, out_queue])
 
-    print('SUCCESS!')
-    print('Exiting...')
-    exit()
-
-
-original_sigint = signal.getsignal(signal.SIGINT)
-
-signal.signal(signal.SIGINT, user_terminate)
-signal.signal(signal.SIGALRM, timeout_terminate)
-
-signal.signal(signal.SIGTERM, user_terminate)
-signal.signal(signal.SIGABRT, user_terminate)
-
+signal.signal(signal.SIGINT, terminate)
+signal.signal(signal.SIGALRM, terminate)
 
 if timeout != 0:
     signal.alarm(timeout)
@@ -114,17 +107,18 @@ print('----------------------------------------------------')
 
 print(f'Number of instances = {no_of_instances} ||  Difficulty = {difficulty}')
       
+# Start timer to calculate overall time taken to find golden nonce
+start_time = datetime.now()
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Upload python script cnd.py to S3 bucket
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-print('Uploading cnd.py to S3 bucket...', end="")
+print('Uploading pow.py to S3 bucket...', end="")
 
-BUCKET = "faizaanbucket"
-s3.Bucket(BUCKET).upload_file("cnd.py", "cnd.py")
+aws.uploadFileToBucket(s3, 'faizaanbucket', 'pow.py', 'pow.py')
 
 print("SUCCESS!")
-
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise instances
@@ -159,42 +153,35 @@ Send message to SQS queue to trigger script
 max_nonce = 2 ** 32
 search_split = math.ceil(max_nonce / len(ordered_instances))
 
-now = datetime.now()
-formatted_datetime = now.strftime("%Y/%m/%d_%H.%M.%S")
-# log_group_name = f'PoW_{formatted_datetime}_i={no_of_instances}_d={difficulty}'
-log_group_name = f'PoW_{formatted_datetime}'
+# Create log group name according to diffficulty
+log_group_name = f'PoW_d_{difficulty}'
+aws.createLogGroup(logs, log_group_name)
 
-# Create a log group
-response = logs.create_log_group(
-    logGroupName=log_group_name,
-    tags={
-        'instances': str(no_of_instances),
-        'difficulty': str(difficulty)
-    }
-)
+# Used for creating log stream name
+log_stream_prefix = start_time.strftime('%Y/%m/%d-[%H.%M.%S]')
 
-
+# Send off messages to input queue
 for i in range(0, len(ordered_instances)):
     print(f'Sending message to input queue to initiate discovery in {ordered_instances[i].id}...', end="")
 
+    # Calculate search space for instance
     start_nonce = search_split * i
     end_nonce = search_split * (i + 1)
-        
+            
     message = {
-        "instanceId" : ordered_instances[i].id,
-        "difficulty" : difficulty,
-        "startNonce" : start_nonce,
-        "endNonce" : end_nonce,
-        "logGroupName" : log_group_name
+        "instanceId"    : ordered_instances[i].id,
+        "difficulty"    : difficulty,
+        "startNonce"    : start_nonce,
+        "endNonce"      : end_nonce,
+        "dateTime"      : log_stream_prefix
     }
     
-    response = aws.sendMessageToQueue(in_queue, message)
+    response = aws.sendMessageToFifoQueue(in_queue, message)
 
     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         print(f'SUCCESS!')
     else:
         print(f'ERROR: Failed to send message to input queue')
-
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Read output queue to get back nonce
@@ -203,7 +190,6 @@ Read output queue to get back nonce
 print(f'Waiting for reply...', end="")
 
 message_received = False
-start_time = datetime.now()
 
 while not message_received: 
     message = aws.receiveMessageFromQueue(out_queue)
@@ -214,82 +200,59 @@ while not message_received:
         
         
 end_time = datetime.now()
-message_time_taken = (end_time - start_time).total_seconds()
 
 print('SUCCESS!')
 
-print(f'Time taken to receive message: {message_time_taken}')
+# Get required data from message
+output_message = json.loads(message[0].body)
+sender_instance_id = output_message['instanceId']
+search_time_taken = output_message['searchTime']
 
-message_body = json.loads(message[0].body)
-nonce = message_body['nonce']
-block_binary = message_body['blockBinary']
-sender_instance_id = message_body['instanceId']
-time_taken = message_body['timeTaken']
+# Shut down instance which sent message
+response = ec2.terminate_instances(InstanceIds=[sender_instance_id])
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Gracefully shutdown all running commands and instances
+Initiate scram
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-print(f'Shutting down all running commands and EC2 instances...', end="")
+print(f'Shutting down all AWS resources...', end="")
 
-instance_id_list = []
-for i in range(0, len(ordered_instances)):
-    instance_id_list.append(ordered_instances[i].id)
-
-cancel_command = 'killall python client.py'
-
-# Send command to cancel script
-ssmresponse = ssm.send_command(
-    InstanceIds=instance_id_list, 
-    DocumentName='AWS-RunShellScript',
-    Parameters= { 'commands': [cancel_command] }
-)
-
-time.sleep(5)
-# aws.cancelAllCommands(ssm)
-
-# Check number of logs
-
+aws.cancelAllCommands(ssm)
+aws.purgeQueues([in_queue, out_queue, scram_queue])
 aws.shutdownAllInstances(ec2, instances)
 
 print('SUCCESS!')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Purge queues
+Push log to CloudWatch
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-print(f'Purging SQS queues...', end="")
+# Calculate total time taken and overhead from using cloud
+overall_time_taken = (end_time - start_time).total_seconds()
+cloud_overhead = overall_time_taken - search_time_taken
 
-# Remove all outstanding messages in queues
-aws.purgeQueues([in_queue, out_queue])
+time_message = {
+    'totalTime' : overall_time_taken,
+    'cloudOverhead' : cloud_overhead
+}
 
-print('SUCCESS!')
+# Create final message to log
+log_message = merge(output_message, time_message)
+log_stream_name = f'{log_stream_prefix}-{sender_instance_id}'
+
+# Create and upload log to stream for successful instance
+aws.createLogStream(logs, log_group_name, log_stream_name)
+aws.putLogEvent(logs, log_group_name, log_stream_name, log_message)
+
+# Allow some time for log events to be pushed
+time.sleep(2)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Retrieve logs
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-# Get log files from S3
-
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Print Stats
+Save logs
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 print('----------------------------------------------------')
 print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
-
-sender_number = 0
-
-
-for i in range(0, len(ordered_instances)):
-    if ordered_instances[i].id == sender_instance_id:
-        sender_number = i
     
-message_delivery_overhead = message_time_taken - float(time_taken)
-
-print(f'Golden nonce: {nonce}')
-print(f'Delivered by instance no. {sender_number} with id {sender_instance_id}')
-print(f'Data in binary: {block_binary}')
-print(f'Discovered in : {"{:.4f}".format(time_taken)}s')
-print(f'Message delivery overhead: {"{:.4f}".format(message_delivery_overhead)}s')
+print(json.dumps(log_message, indent=4))
