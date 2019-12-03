@@ -104,4 +104,4 @@ venv.bak/
 .mypy_cache/
 
 # Sensitive data
-*credentials
+credentials.json
