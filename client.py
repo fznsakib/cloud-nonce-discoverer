@@ -8,7 +8,7 @@ import argparse
 import time
 import datetime
 import functools
-import aws
+import awslib
 from datetime import datetime
 from jsonmerge import merge
 from botocore.exceptions import ClientError
@@ -62,9 +62,9 @@ ec2_resource = boto3.resource('ec2')
 sqs_resource = boto3.resource('sqs')
 
 # SQS Queues
-in_queue_url = aws.getQueueURL(sqs, 'inqueue.fifo')
-out_queue_url = aws.getQueueURL(sqs, 'outqueue.fifo')
-scram_queue_url = aws.getQueueURL(sqs, 'scram_queue')
+in_queue_url = awslib.getQueueURL(sqs, 'inqueue.fifo')
+out_queue_url = awslib.getQueueURL(sqs, 'outqueue.fifo')
+scram_queue_url = awslib.getQueueURL(sqs, 'scram_queue')
 in_queue = sqs_resource.Queue(in_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 scram_queue = sqs_resource.Queue(scram_queue_url)
@@ -85,7 +85,7 @@ def terminate(signum, frame):
     
     print('Shutting down everything and asking back for logs...', end="")
     
-    aws.scram(ssm, ec2, instances, [in_queue, out_queue, scram_queue])
+    awslib.scram(ssm, ec2, instances, [in_queue, out_queue, scram_queue])
 
     print('SUCCESS!')
     print('Exiting...')
@@ -116,7 +116,7 @@ Upload python script cnd.py to S3 bucket
 
 print('Uploading pow.py to S3 bucket...', end="")
 
-aws.uploadFileToBucket(s3, 'faizaanbucket', 'pow.py', 'pow.py')
+awslib.uploadFileToBucket(s3, 'faizaanbucket', 'pow.py', 'pow.py')
 
 print("SUCCESS!")
 
@@ -126,7 +126,7 @@ Initialise instances
 
 print(f'Initialising {no_of_instances} EC2 instance(s)...', end="")
 
-instances = aws.createInstances(ec2, no_of_instances)
+instances = awslib.createInstances(ec2, no_of_instances)
 
 print('SUCCESS!')
 
@@ -136,7 +136,7 @@ Wait to complete checks
 
 print(f'Waiting for EC2 status checks to complete...', end="")
 
-ordered_instances = aws.waitUntilInstancesReady(ec2_resource, no_of_instances)
+ordered_instances = awslib.waitUntilInstancesReady(ec2_resource, no_of_instances)
           
 # Give some additional time for instances to settle down
 # Note: without the wait period below, the Lambda function would fail
@@ -155,7 +155,7 @@ search_split = math.ceil(max_nonce / len(ordered_instances))
 
 # Create log group name according to diffficulty
 log_group_name = f'PoW_d_{difficulty}'
-aws.createLogGroup(logs, log_group_name)
+awslib.createLogGroup(logs, log_group_name)
 
 # Used for creating log stream name
 log_stream_prefix = start_time.strftime('%Y/%m/%d-[%H.%M.%S]')
@@ -176,7 +176,7 @@ for i in range(0, len(ordered_instances)):
         "dateTime"      : log_stream_prefix
     }
     
-    response = aws.sendMessageToFifoQueue(in_queue, message)
+    response = awslib.sendMessageToFifoQueue(in_queue, message)
 
     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         print(f'SUCCESS!')
@@ -192,11 +192,11 @@ print(f'Waiting for reply...', end="")
 message_received = False
 
 while not message_received: 
-    message = aws.receiveMessageFromQueue(out_queue)
+    message = awslib.receiveMessageFromQueue(out_queue)
 
     if message:
         message_received = True
-        aws.deleteMessageFromQueue(out_queue, message)
+        awslib.deleteMessageFromQueue(out_queue, message)
         
         
 end_time = datetime.now()
@@ -217,9 +217,9 @@ Initiate scram
 
 print(f'Shutting down all AWS resources...', end="")
 
-aws.cancelAllCommands(ssm)
-aws.purgeQueues([in_queue, out_queue, scram_queue])
-aws.shutdownAllInstances(ec2, instances)
+awslib.cancelAllCommands(ssm)
+awslib.purgeQueues([in_queue, out_queue, scram_queue])
+awslib.shutdownAllInstances(ec2, instances)
 
 print('SUCCESS!')
 
@@ -241,8 +241,8 @@ log_message = merge(output_message, time_message)
 log_stream_name = f'{log_stream_prefix}-{sender_instance_id}'
 
 # Create and upload log to stream for successful instance
-aws.createLogStream(logs, log_group_name, log_stream_name)
-aws.putLogEvent(logs, log_group_name, log_stream_name, log_message)
+awslib.createLogStream(logs, log_group_name, log_stream_name)
+awslib.putLogEvent(logs, log_group_name, log_stream_name, log_message)
 
 # Allow some time for log events to be pushed
 time.sleep(2)

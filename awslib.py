@@ -1,6 +1,6 @@
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-aws.py 
+awslib.py 
 
 This holds all the custom functions created for the client
 to communicate with AWS using boto3.
