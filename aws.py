@@ -92,6 +92,29 @@ def createLogGroup(logs, log_group_name):
         
         return response
         
+        
+def createLogStream(logs, log_group_name, log_stream_name):
+    response = logs.create_log_stream(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name
+    )
+    return response
+
+def putLogEvent(logs, log_group_name, log_stream_name, message):
+    response = logs.put_log_events(
+    logGroupName=log_group_name,
+    logStreamName=log_stream_name,
+    logEvents=[
+            {
+                'timestamp': int(round(time.time() * 1000)),
+                'message': json.dumps(message)
+            },
+        ]
+    )
+    
+    return response
+
+
 def sendMessageToQueue(queue, message):
     response = queue.send_message(
         MessageBody=(
@@ -126,6 +149,7 @@ def deleteMessageFromQueue(queue, message):
             'ReceiptHandle': message[0].receipt_handle
         }]
     )
+
     
 def cancelAllCommands(ssm):
     # Get all running commands before cancelling

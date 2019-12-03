@@ -111,34 +111,16 @@ def findNonce():
         if (leading_zeroes == difficulty):
             time_taken = (datetime.datetime.now() - start_time).total_seconds()
             
-            # Prepare message to log/send    
+            # Prepare message to send    
             message = {
                 'success': True,
                 'instanceId'  : instance_id,
                 'goldenNonce' : current_nonce,
                 'goldenHash'  : block_hash.hexdigest(),
-                'searchTime'  : time_taken,
                 'searchStart': start_nonce,
-                'searchEnd'  : max_nonce
+                'searchEnd'  : max_nonce,
+                'searchTime'  : time_taken
             }
-            
-            # Create log stream
-            response = logs.create_log_stream(
-                logGroupName=log_group_name,
-                logStreamName=log_stream_name
-            )
-                
-            # Upload log to stream
-            response = logs.put_log_events(
-                logGroupName=log_group_name,
-                logStreamName=log_stream_name,
-                logEvents=[
-                    {
-                        'timestamp': int(round(time.time() * 1000)),
-                        'message': json.dumps(message)
-                    },
-                ],
-            )
             
             # Send message to out_queue to notify the client that nonce 
             # has been found
@@ -188,9 +170,9 @@ def waitForExternalNonceDiscovery():
         'success': False,
         'instanceId' : instance_id,
         'lastNonce'  : current_nonce,
-        'searchTime' : time_taken,
         'searchStart': start_nonce,
-        'searchEnd'  : max_nonce
+        'searchEnd'  : max_nonce,
+        'searchTime' : time_taken
     }
     
     # Create log stream

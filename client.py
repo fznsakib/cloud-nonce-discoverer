@@ -201,13 +201,12 @@ while not message_received:
         
 end_time = datetime.now()
 
-
 print('SUCCESS!')
 
 # Get required data from message
-message_body = json.loads(message[0].body)
-sender_instance_id = message_body['instanceId']
-search_time_taken = message_body['searchTime']
+output_message = json.loads(message[0].body)
+sender_instance_id = output_message['instanceId']
+search_time_taken = output_message['searchTime']
 
 # Shut down instance which sent message
 response = ec2.terminate_instances(InstanceIds=[sender_instance_id])
@@ -218,8 +217,6 @@ Initiate scram
 
 print(f'Shutting down all AWS resources...', end="")
 
-# time.sleep(10)
-
 aws.cancelAllCommands(ssm)
 aws.purgeQueues([in_queue, out_queue, scram_queue])
 aws.shutdownAllInstances(ec2, instances)
@@ -227,76 +224,35 @@ aws.shutdownAllInstances(ec2, instances)
 print('SUCCESS!')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Push log for total time taken
+Push log to CloudWatch
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 # Calculate total time taken and overhead from using cloud
 overall_time_taken = (end_time - start_time).total_seconds()
 cloud_overhead = overall_time_taken - search_time_taken
 
-message = {
+time_message = {
     'totalTime' : overall_time_taken,
     'cloudOverhead' : cloud_overhead
 }
 
-# Get log stream for successful instance(s)
-response = logs.describe_log_streams(
-    logGroupName=log_group_name,
-    logStreamNamePrefix=log_stream_prefix
-)
+# Create final message to log
+log_message = merge(output_message, time_message)
+log_stream_name = f'{log_stream_prefix}-{sender_instance_id}'
 
-log_streams = response['logStreams']
+# Create and upload log to stream for successful instance
+aws.createLogStream(logs, log_group_name, log_stream_name)
+aws.putLogEvent(logs, log_group_name, log_stream_name, log_message)
 
-# Push log event for calculated times for log streams
-for log_stream in log_streams:
-    response = logs.put_log_events(
-        logGroupName=log_group_name,
-        logStreamName=log_stream['logStreamName'],
-        logEvents=[
-            {
-                'timestamp': int(round(time.time() * 1000)),
-                'message': json.dumps(message)
-            },
-        ],
-        sequenceToken=log_stream['uploadSequenceToken']
-    )
-    
 # Allow some time for log events to be pushed
 time.sleep(2)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-Retrieve logs
+Save logs
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-log_events = []
-
-for log_stream in log_streams:
-    response = logs.get_log_events(
-        logGroupName=log_group_name,
-        logStreamName=log_stream['logStreamName'],
-        startFromHead=False
-    )
-    print(response)
-    event_1 = json.loads(response['events'][0]['message'])
-    event_2 = json.loads(response['events'][1]['message'])
-    
-    log = merge(event_1, event_2)
-    
-    # event_1 = dict(response['events'][0]['message'])
-    # event_2 = dict(response['events'][1]['message'])
-        
-    log_events.append(log)
-
-
-# log = response['events'][0]['message']
-# log = json.loads(log)
-
 
 print('----------------------------------------------------')
 print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
-
-for log in log_events:
-    print(json.dumps(log, indent=2))
     
-# print(json.dumps(log, indent=2, sort_keys=True))
+print(json.dumps(log_message, indent=4))
