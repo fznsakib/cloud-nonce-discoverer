@@ -40,13 +40,15 @@ parser = argparse.ArgumentParser(description='''A client interfacing with AWS al
 parser.add_argument("-i", "--instances", default=1, type=instance_type, help="The number of EC2 instances to divide the task across.")
 parser.add_argument("-d", "--difficulty", default=10, type=int, help='''The difficulty of nonce discovery. This corresponds to the 
                     number of leading zero bits required in the hash.''')
-parser.add_argument("-t", "--timeout", default=0, type=time_type, help="Limit of time in seconds before scram is initiated")
+parser.add_argument("-t", "--timeout", default=600, type=time_type, help="Limit of time in seconds before scram is initiated")
+parser.add_argument("-l", "--logscram", default=False, action="store_true", help="Gives the option to collect logs from instances on scram")
 
 args = parser.parse_args()
 
 no_of_instances = args.instances
 difficulty = args.difficulty
 timeout = args.timeout
+log_on_scram = args.logscram
 instances = []
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -55,7 +57,6 @@ Initialise interface to AWS
 
 aws = awslib.initialiseInterface()
 
-# SQS Queues
 queue_names = ['inqueue.fifo', 'outqueue.fifo', 'scram_queue']
 queues = awslib.initialiseQueues(aws['sqs'], queue_names)
 
@@ -74,7 +75,7 @@ def terminate(signum, frame):
     
     print('Shutting down everything and asking back for logs...', end="")
     
-    awslib.scram(ssm, aws['ec2'], instances, queues)
+    awslib.scram(aws['ssm'], aws['ec2'], instances, queues, log_on_scram)
 
     print('SUCCESS!')
     print('Exiting...')
@@ -87,13 +88,13 @@ signal.signal(signal.SIGALRM, terminate)
 if timeout != 0:
     signal.alarm(timeout)
 
-print('----------------------------------------------------')
-print('-----------------------START------------------------')
-print('----------------------------------------------------')
+print('----------------------------------------------------------')
+print('--------------------------START---------------------------')
+print('----------------------------------------------------------')
 
-print(f'Number of instances = {no_of_instances} ||  Difficulty = {difficulty} || Timeout = {timeout}')
+print(f'Number of instances = {no_of_instances} ||  Difficulty = {difficulty} || Timeout = {timeout}s')
 
-print('----------------------------------------------------')
+print('----------------------------------------------------------')
       
 # Start timer to calculate overall time taken to find golden nonce
 start_time = datetime.now()
@@ -142,7 +143,7 @@ max_nonce = 2 ** 32
 search_split = math.ceil(max_nonce / len(ordered_instances))
 
 # Create log group name according to diffficulty
-log_group_name = f'PoW_d_{difficulty}'
+log_group_name = 'PoW'
 awslib.createLogGroup(aws['logs'], log_group_name)
 
 # Used for creating log stream name
@@ -161,7 +162,8 @@ for i in range(0, len(ordered_instances)):
         "difficulty"    : difficulty,
         "startNonce"    : start_nonce,
         "endNonce"      : end_nonce,
-        "dateTime"      : log_stream_prefix
+        "dateTime"      : log_stream_prefix,
+        "logOnScram"    : log_on_scram
     }
     
     response = awslib.sendMessageToFifoQueue(queues['in_queue'], message)
@@ -195,6 +197,7 @@ print('SUCCESS!')
 output_message = json.loads(message[0].body)
 sender_instance_id = output_message['instanceId']
 search_time_taken = output_message['searchTime']
+output_message['searchTime'] = f'{search_time_taken:.6f}'
 
 # Shut down instance which sent message
 response = aws['ec2'].terminate_instances(InstanceIds=[sender_instance_id])
@@ -219,13 +222,18 @@ Push log to CloudWatch
 overall_time_taken = (end_time - start_time).total_seconds()
 cloud_overhead = overall_time_taken - search_time_taken
 
-time_message = {
-    'totalTime' : overall_time_taken,
-    'cloudOverhead' : cloud_overhead
+update_message = {
+    'totalTime'     : float(f'{overall_time_taken:.6f}'),
+    'cloudOverhead' : float(f'{cloud_overhead:.6f}'),
+    'difficulty'    : difficulty,
+    'noOfInstances' : no_of_instances,
+    'logOnScram'    : log_on_scram
 }
 
+output_message['searchTime'] = float(output_message['searchTime'])
+
 # Create final message to log
-log_message = merge(output_message, time_message)
+log_message = merge(output_message, update_message)
 log_stream_name = f'{log_stream_prefix}-{sender_instance_id}'
 
 # Create and upload log to stream for successful instance

@@ -3,6 +3,7 @@ import argparse
 import random
 import hashlib
 import binascii
+from datetime import datetime
 
 parser = argparse.ArgumentParser(description='A locally run golden nonce discoverer for blocks.')
 parser.add_argument("--d", default=10, type=int, help="The difficulty of nonce discovery. This corressponds to the number of leading zero bits required in the hash.")
@@ -39,8 +40,11 @@ def get_block_hash_binary(block_hash):
 
 # Nonce discovery
 if __name__ == "__main__":
+    start_time = datetime.now()
+    nonce = 0
+    
     # Brute force through all possible nonce values
-    for nonce in range(0, max_nonce):
+    while (nonce <= max_nonce):
         block = get_block(nonce)
         block_hash = get_block_hash(block)
         block_hash_binary = get_block_hash_binary(block_hash)
@@ -51,8 +55,12 @@ if __name__ == "__main__":
 
         if (leading_zeroes == difficulty):
             print(f'nonce {nonce} contains require leading zeroes of {difficulty}')
-            print(f'block = {block_hash_binary}')
+            # print(f'block = {block_hash_binary}')
+            time_taken = (datetime.now() - start_time).total_seconds()
+            print(f'time taken: {time_taken:.6f}')
             exit()
+        
+        nonce += 1
 
 
 

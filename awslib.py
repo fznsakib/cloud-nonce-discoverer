@@ -109,14 +109,22 @@ def createLogGroup(logs, log_group_name):
         logGroupNamePrefix=log_group_name,
         limit=1
     )
-
-    if len(log_groups['logGroups']) == 0:
-        # If does not exist then create a log group
-        response = logs.create_log_group(
-            logGroupName=log_group_name,
-        )
-        
-        return response
+    
+    log_groups = log_groups['logGroups']
+    
+    # Need to go through all log groups as list being returned
+    # is based on prefixes. e.g. PoW_d_10 will return even when
+    # searching for a non-existent PoW_d_1
+    for log_group in log_groups:
+        if (log_group['logGroupName'] == log_group_name):
+            return
+    
+    # If does not exist then create a log group
+    response = logs.create_log_group(
+        logGroupName=log_group_name,
+    )
+    
+    return response
         
 def createLogStream(logs, log_group_name, log_stream_name):
     response = logs.create_log_stream(
@@ -200,12 +208,13 @@ def purgeQueues(queues):
     for queue in queues.values():
         queue.purge()
 
-def scram(ssm, ec2, instances, queues):
+def scram(ssm, ec2, instances, queues, request_logs):
     
-    # Notify instances to report upload logs before shutdown
-    for i in range(0, len(instances)):
-        message = {}
-        response = sendMessageToQueue(queues['scram_queue'], message)
+    if request_logs:
+        # Notify instances to report upload logs before shutdown
+        for i in range(0, len(instances)):
+            message = {}
+            response = sendMessageToQueue(queues['scram_queue'], message)
           
     # Shutdown and reset all AWS resources
     cancelAllCommands(ssm)

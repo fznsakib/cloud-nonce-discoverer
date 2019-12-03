@@ -32,6 +32,7 @@ parser.add_argument("--end", default=max_nonce, type=int, help="The number to en
 parser.add_argument("--difficulty", default=10, type=int, help="The difficulty of nonce discovery. This corresponds to the number of leading zero bits required in the hash.")
 parser.add_argument("--id", default='', type=str, help="The ID of the EC2 instance the script will be run on.")
 parser.add_argument("--datetime", default='', type=str, help="The datetime represents the start of the overall process. Used as an identifier for the log for this process.")
+parser.add_argument("--logscram", default=False, type=bool, help="Gives the option to collect logs from instances on scram.")
 
 args = parser.parse_args()
 
@@ -40,8 +41,9 @@ max_nonce = args.end
 difficulty = args.difficulty
 instance_id = args.id
 date_time = args.datetime
+log_on_scram = args.logscram
 
-log_group_name = f'PoW_d_{difficulty}'
+log_group_name = 'PoW'
 log_stream_name = f'{date_time}-{instance_id}'
 
 nonce_found = False
@@ -165,6 +167,7 @@ def waitForExternalNonceDiscovery():
     
     time_taken = (datetime.datetime.now() - start_time).total_seconds()
     
+    
     # Prepare message to log
     message = {
         'success': False,
@@ -172,7 +175,9 @@ def waitForExternalNonceDiscovery():
         'lastNonce'  : current_nonce,
         'searchStart': start_nonce,
         'searchEnd'  : max_nonce,
-        'searchTime' : time_taken
+        'searchTime' : float(f'{time_taken:.6f}'),
+        'difficulty' : difficulty,
+        'logOnScram' : True
     }
     
     # Create log stream
@@ -209,11 +214,15 @@ pow.py main()
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 if __name__ == "__main__":
-    t1 = Thread(target=findNonce, daemon=True)
-    t2 = Thread(target=waitForExternalNonceDiscovery, daemon=True)
+    if log_on_scram:
+        t1 = Thread(target=findNonce, daemon=True)
+        t2 = Thread(target=waitForExternalNonceDiscovery, daemon=True)
 
-    t1.start()
-    t2.start()
+        t1.start()
+        t2.start()
+    else:
+        findNonce()
+
     
     while (nonce_found == False) and (scram_requested == False):
         pass
