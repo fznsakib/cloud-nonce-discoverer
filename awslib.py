@@ -10,9 +10,34 @@ import boto3
 import time
 import json
 
+def initialiseInterface():
+    aws = {
+        'ec2': boto3.client('ec2'),
+        'ssm': boto3.client('ssm'),
+        'logs' : boto3.client('logs'),
+        's3' : boto3.resource('s3'),
+        'sqs' : boto3.resource('sqs'), 
+        'ec2_resource' : boto3.resource('ec2'),
+    }
+
+    return aws
+
+def initialiseQueues(sqs, queue_names):
+    
+    in_queue_url = getQueueURL(sqs, queue_names[0])
+    out_queue_url = getQueueURL(sqs, queue_names[1])
+    scram_queue_url = getQueueURL(sqs, queue_names[2])
+    
+    queues = {
+        'in_queue' : sqs.Queue(in_queue_url),
+        'out_queue': sqs.Queue(out_queue_url),
+        'scram_queue' : sqs.Queue(scram_queue_url)
+    }
+    
+    return queues
+
 def uploadFileToBucket(s3, bucket, file_name, destination):
     s3.Bucket(bucket).upload_file(file_name, destination)
-    
 
 def createFifoQueue(queue_name):
     response = sqs.create_queue(
@@ -26,9 +51,10 @@ def createFifoQueue(queue_name):
     )
 
 def getQueueURL(sqs, queue_name):
-    response = sqs.get_queue_url(QueueName=queue_name)
-    queue_url = response['QueueUrl']
-    return queue_url
+    queue = sqs.get_queue_by_name(
+        QueueName=queue_name,
+    )
+    return queue.url
     
 def createInstances(ec2, no_of_instances):
     instances = ec2.run_instances(
@@ -92,7 +118,6 @@ def createLogGroup(logs, log_group_name):
         
         return response
         
-        
 def createLogStream(logs, log_group_name, log_stream_name):
     response = logs.create_log_stream(
         logGroupName=log_group_name,
@@ -113,7 +138,6 @@ def putLogEvent(logs, log_group_name, log_stream_name, message):
     )
     
     return response
-
 
 def sendMessageToQueue(queue, message):
     response = queue.send_message(
@@ -150,7 +174,6 @@ def deleteMessageFromQueue(queue, message):
         }]
     )
 
-    
 def cancelAllCommands(ssm):
     # Get all running commands before cancelling
     running_commands = ssm.list_commands(
@@ -174,7 +197,7 @@ def shutdownAllInstances(ec2, instances):
     response = ec2.terminate_instances(InstanceIds=instance_ids)
     
 def purgeQueues(queues):
-    for queue in queues:
+    for queue in queues.values():
         queue.purge()
 
 def scram(ssm, ec2, instances, queues):
@@ -182,9 +205,7 @@ def scram(ssm, ec2, instances, queues):
     # Notify instances to report upload logs before shutdown
     for i in range(0, len(instances)):
         message = {}
-        scram_queue = queues[2]
-        
-        response = sendMessageToQueue(queues[2], message)
+        response = sendMessageToQueue(queues['scram_queue'], message)
           
     # Shutdown and reset all AWS resources
     cancelAllCommands(ssm)
