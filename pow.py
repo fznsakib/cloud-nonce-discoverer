@@ -110,7 +110,7 @@ def findNonce():
         leading_zeroes = len(block_hash_binary.split('1', 1)[0])
 
         # If the golden nonce is found
-        if (leading_zeroes == difficulty):
+        if (leading_zeroes >= difficulty):
             time_taken = (datetime.datetime.now() - start_time).total_seconds()
             
             # Prepare message to send    

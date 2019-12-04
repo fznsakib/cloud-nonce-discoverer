@@ -196,7 +196,8 @@ def cancelAllCommands(ssm):
     for command in running_commands['Commands']:
         command_id = command['CommandId']
         ssm.cancel_command(CommandId=command_id)
-        
+
+            
 def shutdownAllInstances(ec2, instances):
     instance_ids = []
     for instance in instances:
