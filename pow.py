@@ -119,8 +119,8 @@ def findNonce():
                 'instanceId'  : instance_id,
                 'goldenNonce' : current_nonce,
                 'goldenHash'  : block_hash.hexdigest(),
-                'searchStart': start_nonce,
-                'searchEnd'  : max_nonce,
+                'searchStart' : start_nonce,
+                'searchEnd'   : max_nonce,
                 'searchTime'  : time_taken
             }
             

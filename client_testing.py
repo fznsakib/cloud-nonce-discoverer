@@ -13,6 +13,7 @@ from datetime import datetime
 from jsonmerge import merge
 from botocore.exceptions import ClientError
 
+
 # Disable output buffering
 print = functools.partial(print, flush=True)
 
@@ -37,12 +38,17 @@ def time_type(x):
 parser = argparse.ArgumentParser(description='''A client interfacing with AWS allowing a user to discover the golden nonce 
                                  for a block. This solution is parallelised across a given n EC2 instances for faster performance.''')
 
-parser.add_argument("-i", "--instances", default=1, type=instance_type, help="The number of EC2 instances to divide the task across.")
-parser.add_argument("-d", "--difficulty", default=10, type=int, help='''The difficulty of nonce discovery. This corresponds to the 
+parser.add_argument("-i", "--instances", default=1, type=instance_type, 
+                    help="The number of EC2 instances to divide the task across.")
+parser.add_argument("-d", "--difficulty", default=10, type=int,
+                    help='''The difficulty of nonce discovery. This corresponds to the 
                     number of leading zero bits required in the hash.''')
-parser.add_argument("-t", "--timeout", default=0, type=time_type, help="Limit of time in seconds before scram is initiated")
-parser.add_argument("-l", "--logscram", default=False, action="store_true", help="Gives the option to collect logs from instances on scram")
-parser.add_argument("-c", "--confidence", default=False, action="store_true", help="This will allow the program to automatically choose the number of instances to spawn according to runtime")
+parser.add_argument("-t", "--timeout", default=0, type=time_type,
+                    help="Limit of time in seconds before scram is initiated")
+parser.add_argument("-l", "--logscram", default=False, action="store_true", 
+                    help="Gives the option to collect logs from instances on scram")
+parser.add_argument("-c", "--confidence", default=False, action="store_true",
+                    help="Automatically choose number of instances to spawn according to runtime")
 
 args = parser.parse_args()
 
@@ -72,7 +78,35 @@ confidence = 0
 if (args.confidence):
     print("Enter your confidence value: ", end="")
     confidence = input()
+exit()
 
+# Get mean
+response = aws['logs'].start_query(
+    logGroupName=log_group_name,
+    startTime=0,
+    endTime=int(time.time()),
+    queryString=('fields searchTime, noOfInstances, @message ' +
+                 '| filter difficulty == 20 ' +
+                 '| stats avg(searchTime) as mean')
+)
+
+print(response)
+
+time.sleep(5)
+
+queryID = response['queryId']
+
+response = aws['logs'].get_query_results(
+    queryId=queryID
+)
+
+print(response)
+# Requirements
+#  - Mean
+#  - Z_q q-quantile depending on confidence
+#  - s.d (variance/sqrt(n))
+
+exit()
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
