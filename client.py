@@ -9,6 +9,7 @@ import time
 import datetime
 import functools
 import awslib
+import confidence
 from datetime import datetime
 from jsonmerge import merge
 from botocore.exceptions import ClientError
@@ -67,12 +68,39 @@ queues = awslib.initialiseQueues(aws['sqs'], queue_names)
 Calculate instance count by confidence value
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-confidence = 0
+confidence_value = 0
+runtime = 0
+min_instances = False
 
 if (args.confidence):
-    print("Enter your confidence value: ", end="")
-    confidence = input()
+    while True:
+        confidence_value = float(input("Enter your confidence value: "))
+        if not (confidence_value >= 0 and confidence_value <= 100):
+            print("Confidence value must be a decimal between 0 and 100")
+        else:
+            break 
+    while True:
+        runtime = float(input("Enter your desired runtime: "))
+        if not (runtime > 0):
+            print("Runtime must be a number above 0")
+        else:
+            break
+    while True:
+        min_instances = input("Would you like to use the minimum number of instances possible? y/n : ")
+        if min_instances == "y":
+            min_instances = True
+            break
+        elif min_instances == "n":
+            min_instances = False  
+            break
+    
+no_of_instances = confidence.getNoOfInstancesByRuntime(runtime, difficulty, confidence_value, min_instances)
 
+if (no_of_instances == -1):
+    print("No number of instances can discover the nonce with confidence in the given runtime.")
+    print("Please try again with a higher run time")
+    
+print(no_of_instances)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
