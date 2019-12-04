@@ -53,7 +53,7 @@ timeout = args.timeout
 log_on_scram = args.logscram
 instances = []
 
-log_group_name = 'PoW'
+log_group_name = 'PoW_logs'
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS

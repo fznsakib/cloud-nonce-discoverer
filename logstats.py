@@ -7,7 +7,7 @@ logs = boto3.client('logs')
 def getLogStats(field, difficulty, noOfInstances):
 
     response = logs.start_query(
-        logGroupName='PoW',
+        logGroupName='PoW_logs',
         startTime=0,
         endTime=int(time.time()),
         queryString=(

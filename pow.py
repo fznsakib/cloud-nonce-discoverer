@@ -43,7 +43,7 @@ instance_id = args.id
 date_time = args.datetime
 log_on_scram = args.logscram
 
-log_group_name = 'PoW'
+log_group_name = 'PoW_logs'
 log_stream_name = f'{date_time}-{instance_id}'
 
 nonce_found = False
