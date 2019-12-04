@@ -73,6 +73,7 @@ runtime = 0
 min_instances = False
 
 if (args.confidence):
+    # Take input and validate before continuing
     while True:
         confidence_value = float(input("Enter your confidence value: "))
         if not (confidence_value >= 0 and confidence_value <= 100):
@@ -94,13 +95,16 @@ if (args.confidence):
             min_instances = False  
             break
     
-no_of_instances = confidence.getNoOfInstancesByRuntime(runtime, difficulty, confidence_value, min_instances)
-
-if (no_of_instances == -1):
-    print("No number of instances can discover the nonce with confidence in the given runtime.")
-    print("Please try again with a higher run time")
+    # Calculate number of instances by runtime and confidence value given
+    no_of_instances = confidence.getNoOfInstancesByRuntime(runtime, difficulty, confidence_value, min_instances)
     
-print(no_of_instances)
+    if (no_of_instances == -1):
+        print("No number of instances can discover the nonce with confidence in the given runtime.")
+        print("Please try again with a higher run time")
+        exit()
+    
+    print(f'Using performance statistics, it has been decided {no_of_instances} instances will be suffcient ' +
+          f'to find the nonce within a runtime of {runtime}')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Callbacks
