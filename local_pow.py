@@ -17,11 +17,7 @@ max_nonce = 2 ** 32
 # Create block with the data and provided nonce
 def get_block(nonce):
     data = "COMSM0010cloud"
-    # Convert data into binary. Remove first two characters ('0b')
-    # bin_data = bin(int.from_bytes(data.encode(), 'big'))[2:]
-    # block = str(bin_data) + str(nonce)
-    block = data + str(nonce)
-    
+    block = data + str(nonce)    
     return block
 
 def get_block_hash(block):
@@ -53,9 +49,8 @@ if __name__ == "__main__":
         
         print(f'number of leading zeroes: {leading_zeroes}')
 
-        if (leading_zeroes == difficulty):
+        if (leading_zeroes >= difficulty):
             print(f'nonce {nonce} contains require leading zeroes of {difficulty}')
-            # print(f'block = {block_hash_binary}')
             time_taken = (datetime.now() - start_time).total_seconds()
             print(f'time taken: {time_taken:.6f}')
             exit()
