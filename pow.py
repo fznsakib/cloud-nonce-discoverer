@@ -59,7 +59,7 @@ logs = boto3.client('logs', region_name='us-east-1')
 s3 = boto3.resource('s3')
 
 scram_queue_url = getQueueURL('scram_queue')
-out_queue_url = getQueueURL('outqueue.fifo')
+out_queue_url = getQueueURL('out_queue')
 scram_queue = sqs_resource.Queue(scram_queue_url)
 out_queue = sqs_resource.Queue(out_queue_url)
 
@@ -130,7 +130,6 @@ def findNonce():
                 MessageBody=(
                     json.dumps(message)
                 ),
-                MessageGroupId='0',
             )
 
             nonce_found = True

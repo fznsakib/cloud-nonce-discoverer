@@ -59,7 +59,7 @@ Initialise interface to AWS
 
 aws = awslib.initialiseInterface()
 
-queue_names = ['inqueue.fifo', 'outqueue.fifo', 'scram_queue']
+queue_names = ['in_queue', 'out_queue', 'scram_queue']
 queues = awslib.initialiseQueues(aws['sqs'], queue_names)
 
 log_group_name = 'PoW_logs'
@@ -188,7 +188,7 @@ max_nonce = 2 ** 32
 search_split = math.ceil(max_nonce / len(ordered_instances))
 
 # Used for creating log stream name
-log_stream_prefix = start_time.strftime('%Y/%m/%d-[%H.%M.%S]')
+date_time = start_time.strftime('%Y/%m/%d-[%H.%M.%S]')
 
 # Send off messages to input queue
 for i in range(0, len(ordered_instances)):
@@ -203,11 +203,11 @@ for i in range(0, len(ordered_instances)):
         "difficulty"    : difficulty,
         "startNonce"    : start_nonce,
         "endNonce"      : end_nonce,
-        "dateTime"      : log_stream_prefix,
+        "dateTime"      : date_time,
         "logOnScram"    : log_on_scram
     }
     
-    response = awslib.sendMessageToFifoQueue(queues['in_queue'], message)
+    response = awslib.sendMessageToQueue(queues['in_queue'], message)
 
     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         print(f'SUCCESS!')
@@ -285,8 +285,6 @@ log_stream_name = f'{log_stream_prefix}-{sender_instance_id}'
 awslib.createLogStream(aws['logs'], log_group_name, log_stream_name)
 awslib.putLogEvent(aws['logs'], log_group_name, log_stream_name, log_message)
 
-# Allow some time for log events to be pushed
-time.sleep(2)
 
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
