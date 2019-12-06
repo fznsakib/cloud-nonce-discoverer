@@ -53,8 +53,6 @@ timeout = args.timeout
 log_on_scram = args.logscram
 instances = []
 
-log_group_name = 'PoW_logs'
-
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Initialise interface to AWS
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -63,6 +61,9 @@ aws = awslib.initialiseInterface()
 
 queue_names = ['inqueue.fifo', 'outqueue.fifo', 'scram_queue']
 queues = awslib.initialiseQueues(aws['sqs'], queue_names)
+
+log_group_name = 'PoW_logs'
+awslib.createLogGroup(aws['logs'], log_group_name)
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Calculate instance count by confidence value
@@ -254,6 +255,7 @@ print(f'Shutting down all AWS resources...', end="")
 
 awslib.cancelAllCommands(aws['ssm'])
 awslib.shutdownAllInstances(aws['ec2'], instances)
+awslib.purgeQueues(queues)
 
 print('SUCCESS!')
 
@@ -296,6 +298,3 @@ print('----------------------COMPLETE----------------------')
 print('----------------------------------------------------')
     
 print(json.dumps(log_message, indent=4))
-
-# TODO - Put this back to near scram
-awslib.purgeQueues(queues)
