@@ -65,6 +65,9 @@ queues = awslib.initialiseQueues(aws['sqs'], queue_names)
 log_group_name = 'PoW_logs'
 awslib.createLogGroup(aws['logs'], log_group_name)
 
+response = aws['s3'].list_buckets()
+bucket_name = response['Buckets'][0]['Name']
+
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 Calculate instance count by confidence value
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -150,7 +153,7 @@ Upload python script cnd.py to S3 bucket
 
 print('Uploading pow.py to S3 bucket...', end="")
 
-awslib.uploadFileToBucket(aws['s3'], bucket_name, 'pow.py', 'pow.py')
+awslib.uploadFileToBucket(aws['s3_resource'], bucket_name, 'pow.py', 'pow.py')
 
 print("SUCCESS!")
 

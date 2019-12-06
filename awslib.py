@@ -15,8 +15,9 @@ def initialiseInterface():
         'ec2': boto3.client('ec2'),
         'ssm': boto3.client('ssm'),
         'logs' : boto3.client('logs'),
-        's3' : boto3.resource('s3'),
         'sqs' : boto3.resource('sqs'), 
+        's3' : boto3.client('s3'),
+        's3_resource' : boto3.resource('s3'),
         'ec2_resource' : boto3.resource('ec2'),
     }
 
