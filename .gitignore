@@ -104,4 +104,5 @@ venv.bak/
 .mypy_cache/
 
 # Sensitive data
+log_checklist.numbers
 credentials.json
