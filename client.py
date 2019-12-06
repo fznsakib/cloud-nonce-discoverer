@@ -104,7 +104,7 @@ if (args.confidence):
         print("Please try again with a higher run time")
         exit()
     
-    print(f'Using performance statistics, it has been decided {no_of_instances} instances will be suffcient ' +
+    print(f'Using performance statistics, it has been decided {no_of_instances} instances will be sufficient ' +
           f'to find the nonce within a runtime of {runtime}')
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -150,7 +150,7 @@ Upload python script cnd.py to S3 bucket
 
 print('Uploading pow.py to S3 bucket...', end="")
 
-awslib.uploadFileToBucket(aws['s3'], 'faizaanbucket', 'pow.py', 'pow.py')
+awslib.uploadFileToBucket(aws['s3'], bucket_name, 'pow.py', 'pow.py')
 
 print("SUCCESS!")
 
@@ -204,7 +204,8 @@ for i in range(0, len(ordered_instances)):
         "startNonce"    : start_nonce,
         "endNonce"      : end_nonce,
         "dateTime"      : date_time,
-        "logOnScram"    : log_on_scram
+        "logOnScram"    : log_on_scram,
+        "bucketName"    : bucket_name
     }
     
     response = awslib.sendMessageToQueue(queues['in_queue'], message)
@@ -279,7 +280,7 @@ output_message['searchTime'] = float(output_message['searchTime'])
 
 # Create final message to log
 log_message = merge(output_message, update_message)
-log_stream_name = f'{log_stream_prefix}-{sender_instance_id}'
+log_stream_name = f'{date_time}-{sender_instance_id}'
 
 # Create and upload log to stream for successful instance
 awslib.createLogStream(aws['logs'], log_group_name, log_stream_name)
