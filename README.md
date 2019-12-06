@@ -21,7 +21,7 @@
     - AmazonSSMFullAccess
     - AWSLambdaSQSQueueExecutionRole
     - CloudwatchApplicationInsightsServiceLinkedRolePolicy
-3. Create an S3 bucket. Provide the name of the bucket as input at the start of the program
+3. Create an S3 bucket
 4. Create 3 SQS queues named: 'in_queue', 'out_queue', 'scram_queue'
 5. Create a Lambda function using the code in [on_input.py](./lambda/run_script.py)
     - Map the queue 'in_queue' to this Lambda function
