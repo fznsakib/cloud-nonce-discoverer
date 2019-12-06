@@ -70,7 +70,7 @@ def createInstances(ec2, no_of_instances):
                 },
             },
         ],
-        ImageId = 'ami-091805f6b92bf74a1',
+        ImageId = 'ami-07f0e3bc668c5a72c',
         InstanceType = 't2.micro',
         KeyName = 'awsec2',
         MinCount = 1,
