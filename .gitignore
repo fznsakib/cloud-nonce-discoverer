@@ -103,8 +103,6 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-log_checklist.numbers
-
 # Sensitive data
 log_checklist.numbers
 credentials.json
